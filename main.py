@@ -8,14 +8,14 @@ app = Flask(__name__)
 # --- CONFIGURACIÓN (VÍA VARIABLES DE ENTORNO EN RAILWAY) ---
 FM_HOST = "fmsk.skinmed.cl"
 FM_DB = "Agenda%20v20b"
-FM_USER = os.getenv("FM_USER", "API")
-FM_PASS = os.getenv("FM_PASS", "0264")
+FM_USER = os.getenv("FM_USER")
+FM_PASS = os.getenv("FM_PASS")
 LAYOUT = "Numeros_dapi"
 
 # Configuración WhatsApp Meta
-WSP_TOKEN = os.getenv("WSP_TOKEN", "EAARJDDwvDREBQo3EHZBdOvJkfWZAhJI7iZCytz9CZCUEeAU5ZB60vPO6ePZCQqdsQVD7a0379Sh217AFZAHqWZBYpgWhKZALyXjDMMax3KKTeGRZBS13mMjDPkWAudKgORiOxNAxi4dfqepnKD9gvlX5uTwMVwitEgdF5IjQFRbpgWRCbZCIJt7KOdWgc191nHUGIZBfdKoPZCCeldiCODoxbSOXXJwxaYYbOgnaVmVtSAnssUqWhGZBCFg60p6OaBXiIMEIaEypnmMSZAl8EeroIKIqzxvdhPG63ooZAFwZD")
-WSP_PHONE_ID = os.getenv("WSP_PHONE_ID", "958121357384779")
-VERIFY_TOKEN = os.getenv("WSP_VERIFY_TOKEN", "Skinmed_Bot_2026_Sec")
+WSP_TOKEN = os.getenv("WSP_TOKEN")
+WSP_PHONE_ID = os.getenv("WSP_PHONE_ID")
+VERIFY_TOKEN = os.getenv("WSP_VERIFY_TOKEN")
 
 def get_fm_token():
     """Inicia sesión en FileMaker Data API."""
