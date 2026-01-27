@@ -44,12 +44,12 @@ def send_wsp(to_phone, text):
 def parse_agenda(data):
     """Limpia el JSON y genera un mensaje legible."""
     if not data:
-        return "⚠️ No tienes citas confirmadas para hoy."
+        return "No tienes citas confirmadas para hoy."
 
     nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre Lista', 'Doctor')
     fecha = data[0]['fieldData'].get('Fecha', '')
     
-    msg = f"👨‍⚕️ *Hola {nombre_dr}*\n📅 Agenda: {fecha}\n\n"
+    msg = f"*Hola {nombre_dr}*\n Agenda: {fecha}\n\n"
     
     # Filtros de exclusión basados en tu JSON
     ignorar = ["Eliminada", "Disponible", "Bloqueada", "Conjunto"]
@@ -63,9 +63,9 @@ def parse_agenda(data):
             hora = ":".join(f['Hora'].split(":")[:2]) # HH:MM
             paciente = f.get('Pacientes::NombreCompleto', 'Sin nombre')
             actividad = f.get('Actividad', 'Cita')
-            msg += f"🕒 *{hora}* - {paciente}\n   _{actividad}_\n\n"
+            msg += f"*{hora}* - {paciente}\n   _{actividad}_\n\n"
 
-    return msg if count > 0 else f"👨‍⚕️ *{nombre_dr}*, hoy no tienes citas confirmadas."
+    return msg if count > 0 else f"*{nombre_dr}*, hoy no tienes citas confirmadas."
 
 @app.route("/webhook", methods=["GET"])
 def verify():
@@ -103,7 +103,7 @@ def webhook():
             if resp.status_code == 200:
                 final_msg = parse_agenda(resp.json()['response']['data'])
             else:
-                final_msg = "⚠️ No se encontró una agenda vinculada a este número para hoy."
+                final_msg = "No se encontró una agenda vinculada a este número para hoy."
             
             send_wsp(doctor_phone, final_msg)
             logout_fm(token)
