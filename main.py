@@ -113,5 +113,39 @@ def webhook():
 
     return jsonify({"status": "received"}), 200
 
+@app.route("/test")
+def test_fm():
+    """Ruta de diagnóstico para ver el JSON crudo de FileMaker."""
+    try:
+        # 1. Obtener Token
+        token = get_fm_token()
+        
+        # 2. Intentar la búsqueda que vimos en Postman
+        find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
+        today = datetime.now().strftime("%m/%d/%Y") # Formato MM/DD/YYYY
+        
+        # Usamos el número del Dr. Walter Gubelin para el test
+        query = {
+            "query": [
+                {"Recurso Humano::Telefono": "+56939129139", "Fecha": today},
+                {"Tipo": "no viene", "omit": "true"}
+            ]
+        }
+        
+        headers = {"Authorization": f"Bearer {token}"}
+        resp = requests.post(find_url, json=query, headers=headers)
+        
+        # 3. Cerrar sesión inmediatamente
+        logout_fm(token)
+
+        # Devolvemos el JSON exacto que entrega FileMaker para validar campos
+        return jsonify({
+            "status_code_fm": resp.status_code,
+            "response_raw": resp.json()
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e), "tip": "Revisa las variables FM_PASS y FM_USER en Railway"})
+
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
