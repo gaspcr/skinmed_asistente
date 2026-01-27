@@ -3,6 +3,7 @@ import requests
 import json
 from flask import Flask, request, jsonify
 from datetime import datetime
+import pytz # Para asegurar la hora de Chile
 
 app = Flask(__name__)
 
@@ -23,10 +24,6 @@ def get_fm_token():
     resp.raise_for_status()
     return resp.json()['response']['token']
 
-def logout_fm(token):
-    url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions/{token}"
-    requests.delete(url)
-
 def send_wsp(to_phone, text):
     url = f"https://graph.facebook.com/v18.0/{WSP_PHONE_ID}/messages"
     headers = {"Authorization": f"Bearer {WSP_TOKEN}", "Content-Type": "application/json"}
@@ -36,19 +33,22 @@ def send_wsp(to_phone, text):
         "type": "text",
         "text": {"body": text}
     }
-    requests.post(url, json=payload, headers=headers)
+    resp = requests.post(url, json=payload, headers=headers)
+    print(f"[WSP] Status: {resp.status_code} - Resp: {resp.text}")
 
 def parse_agenda(data):
-    if not data:
-        return "No tienes citas para hoy."
     nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre Lista', 'Doctor/a')
-    fecha = data[0]['fieldData'].get('Fecha', '')
-    msg = f"*Hola {nombre_dr}*\nAgenda para hoy ({fecha}):\n\n"
+    msg = f"*Hola {nombre_dr}*\nAgenda para hoy:\n\n"
+    
     ignorar = ["Eliminada", "Disponible", "Bloqueada", "Conjunto"]
-    valid_records = [r for r in data if r['fieldData'].get('Tipo') not in ignorar]
-    valid_records.sort(key=lambda x: x['fieldData']['Hora'])
-    if not valid_records: return f"*{nombre_dr}*, no tienes citas confirmadas hoy."
-    for reg in valid_records:
+    # Filtramos y ordenamos
+    validos = [r for r in data if r['fieldData'].get('Tipo') not in ignorar]
+    validos.sort(key=lambda x: x['fieldData']['Hora'])
+
+    if not validos:
+        return f"*{nombre_dr}*, no tienes citas agendadas hoy."
+
+    for reg in validos:
         f = reg['fieldData']
         hora = ":".join(f['Hora'].split(":")[:2])
         paciente = f.get('Pacientes::NombreCompleto', 'Sin nombre')
@@ -58,54 +58,51 @@ def parse_agenda(data):
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
+    print(f"[DEBUG] Raw Payload: {json.dumps(data)}")
+
     try:
-        value = data['entry'][0]['changes'][0]['value']
-        if 'messages' in value:
-            message = value['messages'][0]
-            doctor_phone_raw = message['from']
-            doctor_phone_fm = f"+{doctor_phone_raw}"
+        if 'messages' in data['entry'][0]['changes'][0]['value']:
+            message = data['entry'][0]['changes'][0]['value']['messages'][0]
+            doctor_phone_raw = message['from'] 
+            
+            # 1. Obtener fecha actual en formato MM/DD/YYYY (como en tu Postman)
+            tz_chile = pytz.timezone('America/Santiago')
+            today = datetime.now(tz_chile).strftime("%m/%d/%Y") 
             
             token = get_fm_token()
             find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
             
-            # --- CAMBIO CLAVE: Formato de fecha día/mes/año ---
-            today = datetime.now().strftime("%d/%m/%Y") 
-            
+            # Probamos buscar con y sin el espacio por si acaso
             query = {
                 "query": [
-                    {"Recurso Humano::Telefono": doctor_phone_fm, "Fecha": today},
-                    {"Tipo": "no viene", "omit": "true"}
+                    {"Recurso Humano::Telefono": f"+{doctor_phone_raw}", "Fecha": today},
+                    {"Recurso Humano::Telefono": f" +{doctor_phone_raw}", "Fecha": today}
                 ]
             }
             
+            print(f"[FM] Buscando: {doctor_phone_raw} para fecha {today}")
             resp = requests.post(find_url, json=query, headers={"Authorization": f"Bearer {token}"})
             
-            # --- MANEJO DE ERROR 500 (No records found) ---
             if resp.status_code == 200:
                 final_msg = parse_agenda(resp.json()['response']['data'])
-            elif resp.status_code == 500 or resp.status_code == 401:
-                # Si es 500, revisamos si el mensaje interno de FM es "401"
-                error_data = resp.json()
-                internal_code = error_data.get('messages', [{}])[0].get('code')
-                if internal_code == "401":
-                    final_msg = f"El número {doctor_phone_fm} no registra agenda para hoy ({today})."
-                else:
-                    final_msg = "Error interno de base de datos."
             else:
-                final_msg = "Servicio temporalmente no disponible."
+                # Si no encuentra (401 o 500 con error 401 interno)
+                print(f"[FM] No encontrado o error: {resp.status_code} - {resp.text}")
+                final_msg = "Lo sentimos, este número no está registrado o no tiene agenda hoy."
 
             send_wsp(doctor_phone_raw, final_msg)
-            logout_fm(token)
+            requests.delete(f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions/{token}")
             
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[ERROR] {str(e)}")
+
     return jsonify({"status": "received"}), 200
 
 @app.route("/webhook", methods=["GET"])
 def verify():
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge")
-    return "Token inválido", 403
+    return "Error", 403
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
