@@ -1,6 +1,6 @@
 import os
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from datetime import datetime
 
 app = Flask(__name__)
@@ -146,6 +146,110 @@ def test_fm():
 
     except Exception as e:
         return jsonify({"error": str(e), "tip": "Revisa las variables FM_PASS y FM_USER en Railway"})
+
+@app.route("/agenda")
+def test_fm():
+    try:
+        token = get_fm_token()
+        find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
+        today = datetime.now().strftime("%m/%d/%Y")
+        
+        query = {
+            "query": [
+                {"Recurso Humano::Telefono": "+56939129139", "Fecha": today},
+                {"Tipo": "no viene", "omit": "true"}
+            ]
+        }
+        
+        resp = requests.post(find_url, json=query, headers={"Authorization": f"Bearer {token}"})
+        logout_fm(token)
+
+        if resp.status_code != 200:
+            return f"<h1>⚠️ Error {resp.status_code}</h1><p>No se encontraron datos para hoy.</p>"
+
+        data = resp.json()['response']['data']
+        # Filtros y limpieza
+        ignorar = ["Eliminada", "Disponible", "Bloqueada", "Conjunto"]
+        agenda_limpia = []
+        
+        for reg in data:
+            f = reg['fieldData']
+            if f.get('Tipo') not in ignorar:
+                agenda_limpia.append({
+                    "hora": ":".join(f['Hora'].split(":")[:2]),
+                    "paciente": f.get("Pacientes::NombreCompleto", "---"),
+                    "actividad": f.get("Actividad", "---"),
+                    "tipo": f.get("Tipo")
+                })
+        
+        # Ordenar por hora
+        agenda_limpia.sort(key=lambda x: x['hora'])
+
+        # Plantilla HTML con CSS "Skinmed Style"
+        html_template = """
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <style>
+                body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f4f7f6; color: #333; padding: 20px; }
+                .container { max-width: 800px; margin: auto; background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+                h1 { color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }
+                .meta { margin-bottom: 20px; font-style: italic; color: #7f8c8d; }
+                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+                th { background: #3498db; color: white; padding: 12px; text-align: left; }
+                td { padding: 12px; border-bottom: 1px solid #eee; }
+                tr:hover { background: #f9f9f9; }
+                .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
+                .badge-pabellon { background: #e74c3c; color: white; }
+                .badge-control { background: #2ecc71; color: white; }
+                .badge-consulta { background: #3498db; color: white; }
+                .badge-recordatorio { background: #f1c40f; color: black; }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>🩺 Agenda Asistente Skinmed</h1>
+                <p class="meta">Visualización de prueba para <b>{{ doctor }}</b> - {{ fecha }}</p>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Hora</th>
+                            <th>Paciente</th>
+                            <th>Actividad</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for cita in agenda %}
+                        <tr>
+                            <td><b>{{ cita.hora }}</b></td>
+                            <td>{{ cita.paciente }}</td>
+                            <td>
+                                <span class="badge 
+                                    {% if 'PABELLON' in cita.actividad %}badge-pabellon
+                                    {% elif 'CONTROL' in cita.actividad %}badge-control
+                                    {% elif 'RECORDATORIO' in cita.actividad %}badge-recordatorio
+                                    {% else %}badge-consulta{% endif %}">
+                                    {{ cita.actividad }}
+                                </span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+        
+        return render_template_string(
+            html_template, 
+            agenda=agenda_limpia, 
+            doctor=data[0]['fieldData']['Recurso Humano::Nombre Lista'],
+            fecha=today
+        )
+
+    except Exception as e:
+        return f"<h1 style='color:red;'>CRITICAL ERROR</h1><pre>{str(e)}</pre>"
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
