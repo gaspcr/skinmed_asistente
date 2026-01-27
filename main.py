@@ -29,8 +29,33 @@ def logout_fm(token):
     url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions/{token}"
     requests.delete(url)
 
-def send_wsp(to_phone, text):
-    """Envía el mensaje final al doctor vía WhatsApp."""
+def send_template_agenda(to_phone):
+    """Envía la plantilla interactiva 'revisar_agenda'."""
+    url = f"https://graph.facebook.com/v18.0/{WSP_PHONE_ID}/messages"
+    headers = {"Authorization": f"Bearer {WSP_TOKEN}", "Content-Type": "application/json"}
+    
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": to_phone,
+        "type": "template",
+        "template": {
+            "name": "revisar_agenda",
+            "language": {"code": "es_CHL"},
+            "components": [
+                {
+                    "type": "body",
+                    "parameters": [
+                        {"type": "text", "text": "Doctor/a"} # Valor para {{nombre}}
+                    ]
+                }
+            ]
+        }
+    }
+    resp = requests.post(url, json=payload, headers=headers)
+    return resp.status_code
+
+def send_wsp_text(to_phone, text):
+    """Envía un mensaje de texto plano con la agenda."""
     url = f"https://graph.facebook.com/v18.0/{WSP_PHONE_ID}/messages"
     headers = {"Authorization": f"Bearer {WSP_TOKEN}", "Content-Type": "application/json"}
     payload = {
@@ -49,18 +74,17 @@ def parse_agenda(data):
     nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre Lista', 'Doctor')
     fecha = data[0]['fieldData'].get('Fecha', '')
     
-    msg = f"*Hola {nombre_dr}*\n Agenda: {fecha}\n\n"
+    msg = f"*Hola {nombre_dr}*\nAgenda: {fecha}\n\n"
     
-    # Filtros de exclusión basados en tu JSON
     ignorar = ["Eliminada", "Disponible", "Bloqueada", "Conjunto"]
-    data.sort(key=lambda x: x['fieldData']['Hora']) # Orden cronológico
+    data.sort(key=lambda x: x['fieldData']['Hora'])
 
     count = 0
     for reg in data:
         f = reg['fieldData']
         if f.get('Tipo') not in ignorar:
             count += 1
-            hora = ":".join(f['Hora'].split(":")[:2]) # HH:MM
+            hora = ":".join(f['Hora'].split(":")[:2])
             paciente = f.get('Pacientes::NombreCompleto', 'Sin nombre')
             actividad = f.get('Actividad', 'Cita')
             msg += f"*{hora}* - {paciente}\n   _{actividad}_\n\n"
@@ -69,83 +93,53 @@ def parse_agenda(data):
 
 @app.route("/webhook", methods=["GET"])
 def verify():
-    """Validación requerida por Meta para activar el Webhook."""
     if request.args.get("hub.verify_token") == VERIFY_TOKEN:
         return request.args.get("hub.challenge")
     return "Token de verificación inválido", 403
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    """Recibe el mensaje de WhatsApp y procesa la agenda."""
     data = request.get_json()
     
     try:
-        # Extraer teléfono del remitente
         value = data['entry'][0]['changes'][0]['value']
         if 'messages' in value:
-            doctor_phone = value['messages'][0]['from'] # Formato: 569XXXXXXXX
+            message = value['messages'][0]
+            doctor_phone = message['from']
+            msg_type = message.get('type')
+
+            # --- PASO 1: Si el usuario escribe texto, enviamos la PLANTILLA ---
+            if msg_type == 'text':
+                send_template_agenda(doctor_phone)
             
-            # Consultar FileMaker
-            token = get_fm_token()
-            find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
-            today = datetime.now().strftime("%m/%d/%Y") # Formato MM/DD/YYYY
-            
-            query = {
-                "query": [
-                    {"Recurso Humano::Telefono": f"+{doctor_phone}", "Fecha": today},
-                    {"Tipo": "no viene", "omit": "true"}
-                ]
-            }
-            
-            resp = requests.post(find_url, json=query, headers={"Authorization": f"Bearer {token}"})
-            
-            # Construir y enviar respuesta
-            if resp.status_code == 200:
-                final_msg = parse_agenda(resp.json()['response']['data'])
-            else:
-                final_msg = "No se encontró una agenda vinculada a este número para hoy."
-            
-            send_wsp(doctor_phone, final_msg)
-            logout_fm(token)
+            # --- PASO 2: Si el usuario presiona el BOTÓN de la plantilla ---
+            elif msg_type == 'button':
+                # Consultar FileMaker solo cuando se pulsa el botón
+                token = get_fm_token()
+                find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
+                today = datetime.now().strftime("%m/%d/%Y")
+                
+                query = {
+                    "query": [
+                        {"Recurso Humano::Telefono": f"+{doctor_phone}", "Fecha": today},
+                        {"Tipo": "no viene", "omit": "true"}
+                    ]
+                }
+                
+                resp = requests.post(find_url, json=query, headers={"Authorization": f"Bearer {token}"})
+                
+                if resp.status_code == 200:
+                    final_msg = parse_agenda(resp.json()['response']['data'])
+                else:
+                    final_msg = "No se encontró una agenda vinculada a este número para hoy en Skinmed."
+                
+                send_wsp_text(doctor_phone, final_msg)
+                logout_fm(token)
             
     except Exception as e:
         print(f"Error procesando webhook: {e}")
 
     return jsonify({"status": "received"}), 200
-
-@app.route("/test")
-def test_fm():
-    """Ruta de diagnóstico para ver el JSON crudo de FileMaker."""
-    try:
-        # 1. Obtener Token
-        token = get_fm_token()
-        
-        # 2. Intentar la búsqueda que vimos en Postman
-        find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
-        today = datetime.now().strftime("%m/%d/%Y") # Formato MM/DD/YYYY
-        
-        # Usamos el número del Dr. Walter Gubelin para el test
-        query = {
-            "query": [
-                {"Recurso Humano::Telefono": "+56939129139", "Fecha": today},
-                {"Tipo": "no viene", "omit": "true"}
-            ]
-        }
-        
-        headers = {"Authorization": f"Bearer {token}"}
-        resp = requests.post(find_url, json=query, headers=headers)
-        
-        # 3. Cerrar sesión inmediatamente
-        logout_fm(token)
-
-        # Devolvemos el JSON exacto que entrega FileMaker para validar campos
-        return jsonify({
-            "status_code_fm": resp.status_code,
-            "response_raw": resp.json()
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e), "tip": "Revisa las variables FM_PASS y FM_USER en Railway"})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
