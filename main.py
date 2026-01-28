@@ -24,13 +24,13 @@ class Text(BaseModel):
     body: str
 
 class Message(BaseModel):
-    # Usamos alias para capturar el campo 'from' de JSON en 'sender_phone'
+    # 'alias' captura el nombre real en el JSON de WhatsApp
     sender_phone: str = Field(alias="from") 
     id: str
     text: Optional[Text] = None
     type: str
 
-    # Esto es vital para que Pydantic acepte tanto el alias como el nombre interno
+    # Esta configuración permite que Pydantic maneje bien los alias
     model_config = {"populate_by_name": True}
 
 class Value(BaseModel):
@@ -134,20 +134,19 @@ async def verify(request: Request):
 
 @app.post("/webhook")
 async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
-    """Recepción de mensajes de WhatsApp."""
-    # Pydantic ya validó que el JSON es correcto hasta aquí
     try:
-        # Extraemos el mensaje (asumiendo que viene uno)
         change = payload.entry[0].changes[0].value
         if change.messages:
             msg = change.messages[0]
-            doctor_phone = msg.from_
             
-            # AGREGAR TAREA A SEGUNDO PLANO
-            # Respondemos 200 OK a Meta inmediatamente y seguimos trabajando
+            # CAMBIO AQUÍ: Usamos el nuevo nombre 'sender_phone'
+            doctor_phone = msg.sender_phone 
+            
+            print(f"✅ Mensaje detectado de: {doctor_phone}")
             background_tasks.add_task(process_doctor_request, doctor_phone)
             
     except Exception as e:
-        print(f"Error en webhook: {e}")
+        # Esto es lo que imprimió el error que viste en Railway
+        print(f"❌ Error en webhook: {e}")
         
     return {"status": "ok"}
