@@ -97,12 +97,33 @@ async def process_doctor_request(phone: str):
     print(f"🚀 Iniciando procesamiento para el teléfono: {phone}")
     async with httpx.AsyncClient() as client:
         try:
-            # ... tu lógica de fecha ...
+            # Lógica de fecha
+            tz = pytz.timezone("America/Santiago")
+            today_str = datetime.now(tz).strftime("%m/%d/%Y")
+
             token = await get_fm_token(client)
             print(f"🔑 Token de FileMaker obtenido correctamente")
 
-            # ... lógica de búsqueda ...
-            print(f"🔎 Buscando en FileMaker con query: {phone}")
+            # Lógica de búsqueda
+            find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
+            
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}"
+            }
+            
+            # Busqueda: Agenda de hoy para el usuario (telefono)
+            # Asumimos que "Recurso Humano::Celular" es el campo correcto
+            query = {
+                "query": [
+                    {
+                        "Fecha": today_str,
+                        "Recurso Humano::Celular": phone 
+                    }
+                ]
+            }
+
+            print(f"🔎 Buscando en FileMaker con query: {query}")
             resp = await client.post(find_url, json=query, headers=headers)
             
             print(f"📊 Respuesta FileMaker Status: {resp.status_code}")
