@@ -8,7 +8,6 @@ import httpx
 
 app = FastAPI(title="Bot Clínica SkinMed")
 
-# --- CONFIGURACIÓN (Variables de Entorno) ---
 FM_HOST = "fmsk.skinmed.cl"
 FM_DB = "Agenda%20v20b"
 FM_USER = os.getenv("FM_USER")
