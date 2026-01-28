@@ -3,7 +3,7 @@ import pytz
 from datetime import datetime
 from typing import List, Optional
 from fastapi import FastAPI, Request, Response, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 import httpx
 
 app = FastAPI(title="Bot Clínica SkinMed")
@@ -25,14 +25,14 @@ class Text(BaseModel):
     body: str
 
 class Message(BaseModel):
-    from_: str = ""  # 'from' es palabra reservada en Python
+    # Usamos alias para capturar el campo 'from' de JSON en 'sender_phone'
+    sender_phone: str = Field(alias="from") 
     id: str
     text: Optional[Text] = None
     type: str
 
-    class Config:
-        # Esto permite mapear el campo 'from' del JSON a 'from_'
-        fields = {'from_': 'from'}
+    # Esto es vital para que Pydantic acepte tanto el alias como el nombre interno
+    model_config = {"populate_by_name": True}
 
 class Value(BaseModel):
     messaging_product: str
@@ -95,41 +95,33 @@ async def send_wsp_msg(to_phone: str, text: str):
         await client.post(url, json=payload, headers=headers)
 
 async def process_doctor_request(phone: str):
-    """Toda la lógica pesada ocurre aquí en segundo plano."""
+    print(f"🚀 Iniciando procesamiento para el teléfono: {phone}")
     async with httpx.AsyncClient() as client:
         try:
-            # 1. Preparar Fecha
-            tz_chile = pytz.timezone('America/Santiago')
-            today = datetime.now(tz_chile).strftime("%m/%d/%Y")
-            
-            # 2. FileMaker Auth
+            # ... tu lógica de fecha ...
             token = await get_fm_token(client)
-            
-            # 3. Buscar en FileMaker
-            find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{LAYOUT}/_find"
-            query = {
-                "query": [
-                    {"Recurso Humano::Telefono": f"+{phone}", "Fecha": today},
-                    {"Recurso Humano::Telefono": f" +{phone}", "Fecha": today}
-                ]
-            }
-            
-            headers = {"Authorization": f"Bearer {token}"}
+            print(f"🔑 Token de FileMaker obtenido correctamente")
+
+            # ... lógica de búsqueda ...
+            print(f"🔎 Buscando en FileMaker con query: {phone}")
             resp = await client.post(find_url, json=query, headers=headers)
+            
+            print(f"📊 Respuesta FileMaker Status: {resp.status_code}")
             
             if resp.status_code == 200:
                 final_msg = parse_agenda(resp.json()['response']['data'])
             else:
-                final_msg = "Lo sentimos, este número no está registrado o no tiene agenda hoy."
+                print(f"⚠️ No se encontró agenda. Detalle: {resp.text}")
+                final_msg = "Lo sentimos, no tienes agenda hoy."
 
-            # 4. Responder por WhatsApp
+            # ENVÍO DE WHATSAPP
+            print(f"📤 Intentando enviar mensaje por WSP a {phone}...")
+            # Asegúrate de que esta URL y el WSP_PHONE_ID sean correctos
             await send_wsp_msg(phone, final_msg)
-            
-            # 5. Cerrar sesión FM
-            await client.delete(f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions/{token}")
+            print(f"✅ Proceso finalizado con éxito")
             
         except Exception as e:
-            print(f"Error procesando agenda: {e}")
+            print(f"❌ ERROR CRÍTICO en la tarea de fondo: {str(e)}")
 
 # --- ENDPOINTS ---
 
