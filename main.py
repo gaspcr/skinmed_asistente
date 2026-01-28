@@ -139,7 +139,6 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
         if change.messages:
             msg = change.messages[0]
             
-            # CAMBIO AQUÍ: Usamos el nuevo nombre 'sender_phone'
             doctor_phone = msg.sender_phone 
             
             print(f"✅ Mensaje detectado de: {doctor_phone}")
