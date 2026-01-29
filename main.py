@@ -128,9 +128,14 @@ async def send_initial_template(to_phone: str, nombre: str):
             ]
         }
     }
+    print(f"DEBUG: Enviando template a {url}")
+    print(f"DEBUG: PHONE_ID: {WSP_PHONE_ID}")
+    print(f"DEBUG: Payload: {payload}")
     async with httpx.AsyncClient() as client:
         resp = await client.post(url, json=payload, headers=headers)
-        print(resp)
+        print(f"DEBUG: Status Code: {resp.status_code}")
+        print(f"DEBUG: Response Body: {resp.text}")
+        resp.raise_for_status()
 
 async def process_doctor_request(phone: str):
     print(f"🚀 Iniciando procesamiento para el teléfono: {phone}")
