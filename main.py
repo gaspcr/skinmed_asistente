@@ -23,10 +23,26 @@ META_API_VERSION = 'v24.0'
 class Text(BaseModel):
     body: str
 
+class Profile(BaseModel):
+    name: str
+
+class Contact(BaseModel):
+    profile: Profile
+    wa_id: str
+
+class ButtonReply(BaseModel):
+    id: str
+    title: str
+
+class Interactive(BaseModel):
+    type: str
+    button_reply: Optional[ButtonReply] = None
+
 class Message(BaseModel):
     sender_phone: str = Field(alias="from") 
     id: str
     text: Optional[Text] = None
+    interactive: Optional[Interactive] = None
     type: str
 
     model_config = {"populate_by_name": True}
@@ -34,6 +50,7 @@ class Message(BaseModel):
 class Value(BaseModel):
     messaging_product: str
     messages: Optional[List[Message]] = None
+    contacts: Optional[List[Contact]] = None
 
 class Change(BaseModel):
     value: Value
@@ -169,13 +186,26 @@ async def verify(request: Request):
 async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
     try:
         change = payload.entry[0].changes[0].value
+        
+        # Obtener nombre del doctor si viene en los contactos
+        doctor_name = "Doctor"
+        if change.contacts:
+            doctor_name = change.contacts[0].profile.name
+
         if change.messages:
             msg = change.messages[0]
-            
             doctor_phone = msg.sender_phone 
             
-            print(f"✅ Mensaje detectado de: {doctor_phone}")
-            background_tasks.add_task(process_doctor_request, doctor_phone)
+            print(f"✅ Mensaje detectado de: {doctor_phone} | Tipo: {msg.type}")
+
+            if msg.type == "text":
+                await send_initial_template(doctor_phone, doctor_name)
+
+            elif msg.type == "interactive":
+                # Si recibimos interacción de botón
+                # Idealmente verificamos el ID o Título del botón si hay varios
+                # Por ahora asumimos que es el de revisar agenda
+                background_tasks.add_task(process_doctor_request, doctor_phone)
             
     except Exception as e:
         print(f"❌ Error en webhook: {e}")
