@@ -113,8 +113,8 @@ async def send_initial_template(to_phone: str, nombre: str):
         "to": to_phone,
         "type": "template",
         "template": {
-            "name": "revisar_agenda",
-            "language": {"code": "es_CHL"},
+            "name": "respuesta_inicial_doctores",
+            "language": {"code": "es"},
             "components": [
                 {
                     "type": "body",
@@ -208,10 +208,15 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
                 await send_initial_template(doctor_phone, doctor_name)
 
             elif msg.type == "interactive":
-                # Si recibimos interacción de botón
-                # Idealmente verificamos el ID o Título del botón si hay varios
-                # Por ahora asumimos que es el de revisar agenda
-                background_tasks.add_task(process_doctor_request, doctor_phone)
+                btn_title = msg.interactive.button_reply.title
+                print(f"🔘 Botón presionado: {btn_title}")
+                
+                if btn_title == "Revisar mi agenda del día":
+                    background_tasks.add_task(process_doctor_request, doctor_phone)
+                elif btn_title in ["Consultar cita paciente", "Consultar mis boxes"]:
+                    await send_wsp_msg(doctor_phone, "Estamos trabajando en esta opción 🚧")
+                else:
+                    await send_wsp_msg(doctor_phone, "Opción no reconocida")
             
     except Exception as e:
         print(f"❌ Error en webhook: {e}")
