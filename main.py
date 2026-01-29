@@ -129,7 +129,8 @@ async def send_initial_template(to_phone: str, nombre: str):
         }
     }
     async with httpx.AsyncClient() as client:
-        await client.post(url, json=payload, headers=headers)
+        resp = await client.post(url, json=payload, headers=headers)
+        print(resp)
 
 async def process_doctor_request(phone: str):
     print(f"🚀 Iniciando procesamiento para el teléfono: {phone}")
