@@ -163,7 +163,7 @@ async def process_doctor_request(phone: str):
                 "query": [
                     {
                         "Fecha": today_str,
-                        "Recurso Humano::Telefono": f"+{phone}"
+                        "Recurso Humano::Telefono": f"{phone}"
                     }
                 ]
             }
