@@ -117,7 +117,7 @@ async def send_initial_template(to_phone: str, nombre: str):
             "language": {"code": "es"},
             "components": [
                 {
-                    "type": "body",
+                    "type": "header",
                     "parameters": [
                         {
                             "type": "text",
