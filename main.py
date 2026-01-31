@@ -162,7 +162,7 @@ async def process_doctor_request(phone: str):
             query = {
                 "query": [
                     {
-                        "Fecha": today_str,
+                        "Fecha": '01/30/2026',
                         "Recurso Humano::Telefono": f"{phone}"
                     }
                 ]
