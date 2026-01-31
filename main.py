@@ -30,6 +30,10 @@ class Contact(BaseModel):
     profile: Profile
     wa_id: str
 
+class Button(BaseModel):
+    text: str
+    payload: Optional[str] = None
+
 class ButtonReply(BaseModel):
     id: str
     title: str
@@ -43,6 +47,7 @@ class Message(BaseModel):
     id: str
     text: Optional[Text] = None
     interactive: Optional[Interactive] = None
+    button: Optional[Button] = None
     type: str
 
     model_config = {"populate_by_name": True}
@@ -209,8 +214,19 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
 
             elif msg.type == "interactive":
                 btn_title = msg.interactive.button_reply.title
-                print(f"🔘 Botón presionado: {btn_title}")
+                print(f"🔘 Botón Interactivo presionado: {btn_title}")
                 
+                if btn_title == "Revisar mi agenda del día":
+                    background_tasks.add_task(process_doctor_request, doctor_phone)
+                elif btn_title in ["Consultar cita paciente", "Consultar mis boxes"]:
+                    await send_wsp_msg(doctor_phone, "Estamos trabajando en esta opción 🚧")
+                else:
+                    await send_wsp_msg(doctor_phone, "Opción no reconocida")
+
+            elif msg.type == "button":
+                btn_title = msg.button.text
+                print(f"🔘 Botón Template presionado: {btn_title}")
+
                 if btn_title == "Revisar mi agenda del día":
                     background_tasks.add_task(process_doctor_request, doctor_phone)
                 elif btn_title in ["Consultar cita paciente", "Consultar mis boxes"]:
