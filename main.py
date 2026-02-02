@@ -8,10 +8,10 @@ from app.auth.models import Role
 
 app = FastAPI(title="Bot Clínica SkinMed")
 
-async def process_doctor_request(phone: str):
-    print(f"🚀 Iniciando procesamiento para el teléfono: {phone}")
-    agenda_msg = await FileMakerService.get_agenda(phone)
-    print(f"📤 Intentando enviar mensaje por WSP a {phone}...")
+async def process_doctor_request(name: str, phone: str):
+    print(f"🚀 Iniciando procesamiento para el doctor: {name}")
+    agenda_msg = await FileMakerService.get_agenda(name)
+    print(f"📤 Intentando enviar mensaje por WSP a {name} - {phone}...")
     await WhatsAppService.send_message(phone, agenda_msg)
     print(f"✅ Proceso finalizado con éxito")
 
@@ -57,7 +57,7 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
 
                 if user.role == Role.DOCTOR:
                     if btn_title == "Revisar mi agenda del día":
-                        background_tasks.add_task(process_doctor_request, sender_phone)
+                        background_tasks.add_task(process_doctor_request, user.name, sender_phone)
                     elif btn_title in ["Consultar cita paciente", "Consultar mis boxes"]:
                         await WhatsAppService.send_message(sender_phone, "Estamos trabajando en esta opción 🚧")
                     else:

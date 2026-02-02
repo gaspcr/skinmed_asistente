@@ -51,7 +51,7 @@ class FileMakerService:
         return msg
 
     @staticmethod
-    async def get_agenda(phone: str) -> str:
+    async def get_agenda(name: str) -> str:
         async with httpx.AsyncClient() as client:
             try:
                 tz = pytz.timezone("America/Santiago")
@@ -69,12 +69,12 @@ class FileMakerService:
                     "query": [
                         {
                             "Fecha": today_str,
-                            "Recurso Humano::Telefono": f"+{phone}"
+                            "Recurso Humano::Nombre": name
                         }
                     ]
                 }
                 
-                print(f"DEBUG: Buscando agenda para +{phone}")
+                print(f"DEBUG: Buscando agenda para doctor: {name}")
                 resp = await client.post(find_url, json=query, headers=headers)
                 
                 if resp.status_code == 200:
