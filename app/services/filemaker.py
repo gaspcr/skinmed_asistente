@@ -33,6 +33,11 @@ class FileMakerService:
         if not data:
             return "No hay citas agendadas para hoy."
         
+        # DEBUG: Print available fields
+        if data:
+            print("DEBUG: Campos disponibles en primer registro:")
+            print(list(data[0]['fieldData'].keys()))
+        
         nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre Lista')
         msg = f"*Hola {nombre_dr}*\nAgenda para hoy:\n\n"
         
