@@ -42,9 +42,15 @@ class FileMakerService:
         nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre')
         msg = f"*Hola {nombre_dr}*\nAgenda para hoy:\n\n"
         
-        # Exclude specific types
-        ignorar = ["Eliminada", "Bloqueada", "Recordatorio", "Visitador médico", "Visitador Médico"]
-        validos = [r for r in data if r['fieldData'].get('Tipo') not in ignorar]
+        # Exclude specific types and activities
+        ignorar_tipo = ["Eliminada", "Bloqueada"]
+        ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
+        
+        validos = [
+            r for r in data 
+            if r['fieldData'].get('Tipo') not in ignorar_tipo 
+            and r['fieldData'].get('Actividad', '').upper() not in ignorar_actividad
+        ]
         validos.sort(key=lambda x: x['fieldData']['Hora'])
 
         if not validos:
