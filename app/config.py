@@ -6,6 +6,7 @@ FM_DB = "Agenda%20v20b"
 FM_USER = os.getenv("FM_USER")
 FM_PASS = os.getenv("FM_PASS")
 LAYOUT = "Numeros_dapi"
+AUTH_LAYOUT = "AuthUsuarios_dapi"
 
 # WhatsApp Config
 WSP_TOKEN = os.getenv("WSP_TOKEN")

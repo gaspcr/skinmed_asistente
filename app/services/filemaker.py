@@ -68,3 +68,59 @@ class FileMakerService:
             except Exception as e:
                 print(f"ERROR: {e}")
                 return "Error al consultar la agenda."
+
+    @staticmethod
+    async def get_user_by_phone(phone: str):
+        """Query FileMaker to get user info and role by phone number."""
+        from app.config import AUTH_LAYOUT
+        from app.auth.models import User, Role
+        
+        async with httpx.AsyncClient() as client:
+            try:
+                token = await FileMakerService.get_token(client)
+                
+                find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{AUTH_LAYOUT}/_find"
+                headers = {
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {token}"
+                }
+                
+                query = {
+                    "query": [
+                        {
+                            "Telefono": f"+{phone}"
+                        }
+                    ]
+                }
+                
+                print(f"DEBUG: Buscando usuario con teléfono +{phone}")
+                resp = await client.post(find_url, json=query, headers=headers)
+                
+                if resp.status_code == 200:
+                    data = resp.json()['response']['data']
+                    if data:
+                        user_data = data[0]['fieldData']
+                        nombre = user_data.get('Nombre', 'Usuario')
+                        rol_str = user_data.get('ROL', '').lower()
+                        
+                        # Map FileMaker role to our Role enum
+                        role_mapping = {
+                            'doctor': Role.DOCTOR,
+                            'gerente': Role.MANAGER,
+                            'enfermera_jefe': Role.HEAD_NURSE,
+                            'enfermera jefe': Role.HEAD_NURSE,
+                        }
+                        
+                        role = role_mapping.get(rol_str, Role.DOCTOR)
+                        
+                        print(f"DEBUG: Usuario encontrado: {nombre}, Rol: {role}")
+                        return User(phone=phone, name=nombre, role=role)
+                    else:
+                        print(f"DEBUG: No se encontró usuario con teléfono +{phone}")
+                        return None
+                else:
+                    print(f"DEBUG: FM Auth Response: {resp.status_code} - {resp.text}")
+                    return None
+            except Exception as e:
+                print(f"ERROR al buscar usuario: {e}")
+                return None

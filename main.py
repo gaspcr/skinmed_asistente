@@ -33,7 +33,7 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
             sender_phone = msg.sender_phone
             
             # Auth Lookup
-            user = AuthService.get_user_by_phone(sender_phone)
+            user = await AuthService.get_user_by_phone(sender_phone)
             if not user:
                 print(f"⚠️ Usuario no autorizado o no registrado: {sender_phone}")
                 # Optional: Send a "Contact Admin" message?
