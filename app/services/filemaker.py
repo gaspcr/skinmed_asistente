@@ -38,7 +38,8 @@ class FileMakerService:
             print("DEBUG: Campos disponibles en primer registro:")
             print(list(data[0]['fieldData'].keys()))
         
-        nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre Lista')
+        # Fixed field name: 'Recurso Humano::Nombre' instead of 'Recurso Humano::Nombre Lista'
+        nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre')
         msg = f"*Hola {nombre_dr}*\nAgenda para hoy:\n\n"
         
         # Exclude specific types
@@ -52,10 +53,15 @@ class FileMakerService:
         for reg in validos:
             f = reg['fieldData']
             hora = ":".join(f['Hora'].split(":")[:2])
-            nombre = f.get('NOMBRE', '')
-            apellido = f.get('APELLIDO PATERNO', '')
+            
+            # Fixed field names with 'Pacientes::' prefix
+            nombre = f.get('Pacientes::NOMBRE', '')
+            apellido = f.get('Pacientes::APELLIDO PATERNO', '')
             paciente = f"{nombre} {apellido}".strip() or 'Sin paciente'
-            motivo = f.get('Motivo', 'Sin motivo')
+            
+            # Fixed field name: 'Actividad' instead of 'Motivo'
+            motivo = f.get('Actividad', 'Sin motivo')
+            
             tipo = f.get('Tipo', '')
             conjunto_tag = " 🔗" if tipo.lower() == "conjunto" else ""
             
