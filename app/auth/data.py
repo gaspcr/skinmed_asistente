@@ -1,3 +1,5 @@
+# DEPRECATED
+
 from app.auth.models import User, Role
 
 # Mapping phone -> User

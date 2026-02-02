@@ -1,15 +1,37 @@
 import httpx
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
+from typing import Optional
 from app.config import FM_HOST, FM_DB, FM_USER, FM_PASS, LAYOUT
 
 class FileMakerService:
-    @staticmethod
-    async def get_token(client: httpx.AsyncClient) -> str:
+    # Token cache (class variable shared across all instances)
+    _cached_token: Optional[str] = None
+    _token_expires_at: Optional[datetime] = None
+    
+    @classmethod
+    async def get_token(cls, client: httpx.AsyncClient, force_refresh: bool = False) -> str:
+        """Get FileMaker token, reusing cached token if still valid."""
+        now = datetime.now()
+        
+        # Check if we have a valid cached token
+        if not force_refresh and cls._cached_token and cls._token_expires_at:
+            if now < cls._token_expires_at:
+                print(f"DEBUG: Reusing cached FileMaker token (expires in {(cls._token_expires_at - now).seconds}s)")
+                return cls._cached_token
+        
+        # Request new token
+        print("DEBUG: Requesting new FileMaker token")
         url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions"
         resp = await client.post(url, auth=(FM_USER, FM_PASS), json={})
         resp.raise_for_status()
-        return resp.json()['response']['token']
+        
+        cls._cached_token = resp.json()['response']['token']
+        # FileMaker tokens typically expire after 15 minutes, we'll cache for 14 to be safe
+        cls._token_expires_at = now + timedelta(minutes=14)
+        
+        print(f"DEBUG: New token cached, expires at {cls._token_expires_at.strftime('%H:%M:%S')}")
+        return cls._cached_token
 
     @staticmethod
     def parse_agenda(data: list) -> str:
