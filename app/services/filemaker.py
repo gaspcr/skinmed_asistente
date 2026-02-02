@@ -36,7 +36,8 @@ class FileMakerService:
         nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre Lista')
         msg = f"*Hola {nombre_dr}*\nAgenda para hoy:\n\n"
         
-        ignorar = ["Eliminada", "Disponible", "Bloqueada", "Conjunto"]
+        # Exclude specific types
+        ignorar = ["Eliminada", "Bloqueada", "Recordatorio", "Visitador médico", "Visitador Médico"]
         validos = [r for r in data if r['fieldData'].get('Tipo') not in ignorar]
         validos.sort(key=lambda x: x['fieldData']['Hora'])
 
@@ -46,8 +47,15 @@ class FileMakerService:
         for reg in validos:
             f = reg['fieldData']
             hora = ":".join(f['Hora'].split(":")[:2])
-            paciente = f.get('Pacientes::NombreCompleto', 'Sin nombre')
-            msg += f"*{hora}* - {paciente}\n"
+            nombre = f.get('NOMBRE', '')
+            apellido = f.get('APELLIDO PATERNO', '')
+            paciente = f"{nombre} {apellido}".strip() or 'Sin paciente'
+            motivo = f.get('Motivo', 'Sin motivo')
+            tipo = f.get('Tipo', '')
+            conjunto_tag = " 🔗" if tipo.lower() == "conjunto" else ""
+            
+            msg += f"*{hora}* - {paciente}\n  📋 {motivo}{conjunto_tag}\n\n"
+        
         return msg
 
     @staticmethod
@@ -68,7 +76,7 @@ class FileMakerService:
                 query = {
                     "query": [
                         {
-                            "Fecha": today_str,
+                            "Fecha": "02-02-2026",
                             "Recurso Humano::Nombre": name
                         }
                     ]
