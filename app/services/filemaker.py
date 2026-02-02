@@ -5,29 +5,24 @@ from typing import Optional
 from app.config import FM_HOST, FM_DB, FM_USER, FM_PASS, LAYOUT
 
 class FileMakerService:
-    # Token cache (class variable shared across all instances)
     _cached_token: Optional[str] = None
     _token_expires_at: Optional[datetime] = None
     
     @classmethod
     async def get_token(cls, client: httpx.AsyncClient, force_refresh: bool = False) -> str:
-        """Get FileMaker token, reusing cached token if still valid."""
         now = datetime.now()
         
-        # Check if we have a valid cached token
         if not force_refresh and cls._cached_token and cls._token_expires_at:
             if now < cls._token_expires_at:
                 print(f"DEBUG: Reusing cached FileMaker token (expires in {(cls._token_expires_at - now).seconds}s)")
                 return cls._cached_token
         
-        # Request new token
         print("DEBUG: Requesting new FileMaker token")
         url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions"
         resp = await client.post(url, auth=(FM_USER, FM_PASS), json={})
         resp.raise_for_status()
         
         cls._cached_token = resp.json()['response']['token']
-        # FileMaker tokens typically expire after 15 minutes, we'll cache for 14 to be safe
         cls._token_expires_at = now + timedelta(minutes=14)
         
         print(f"DEBUG: New token cached, expires at {cls._token_expires_at.strftime('%H:%M:%S')}")
@@ -110,7 +105,7 @@ class FileMakerService:
                 query = {
                     "query": [
                         {
-                            "Telefono": f"+{phone}"
+                            "Telefono": phone
                         }
                     ]
                 }
@@ -122,15 +117,13 @@ class FileMakerService:
                     data = resp.json()['response']['data']
                     if data:
                         user_data = data[0]['fieldData']
-                        nombre = user_data.get('Nombre', 'Usuario')
-                        rol_str = user_data.get('ROL', '').lower()
+                        nombre = user_data.get('Nombre')
+                        rol_str = user_data.get('ROL').lower()
                         
-                        # Map FileMaker role to our Role enum
                         role_mapping = {
                             'doctor': Role.DOCTOR,
                             'gerente': Role.MANAGER,
                             'enfermera_jefe': Role.HEAD_NURSE,
-                            'enfermera jefe': Role.HEAD_NURSE,
                         }
                         
                         role = role_mapping.get(rol_str, Role.DOCTOR)
@@ -138,7 +131,7 @@ class FileMakerService:
                         print(f"DEBUG: Usuario encontrado: {nombre}, Rol: {role}")
                         return User(phone=phone, name=nombre, role=role)
                     else:
-                        print(f"DEBUG: No se encontró usuario con teléfono +{phone}")
+                        print(f"DEBUG: No se encontró usuario con teléfono {phone}")
                         return None
                 else:
                     print(f"DEBUG: FM Auth Response: {resp.status_code} - {resp.text}")

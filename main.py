@@ -27,33 +27,26 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
     try:
         change = payload.entry[0].changes[0].value
         
-        # Check permissions
         if change.messages:
             msg = change.messages[0]
             sender_phone = msg.sender_phone
             
-            # Auth Lookup
             user = await AuthService.get_user_by_phone(sender_phone)
             if not user:
                 print(f"⚠️ Usuario no autorizado o no registrado: {sender_phone}")
-                # Optional: Send a "Contact Admin" message?
                 return {"status": "ignored", "reason": "unauthorized"}
 
             print(f"✅ Usuario autenticado: {user.name} ({user.role})")
 
-            # Route based on Message Type
             if msg.type == "text":
-                # Route based on Role
                 if user.role == Role.DOCTOR:
                     await WhatsAppService.send_template(sender_phone, user.name, "respuesta_inicial_doctores")
                 elif user.role == Role.MANAGER:
-                    # Placeholder for Manager Template
                     await WhatsAppService.send_message(sender_phone, f"Hola Gerente {user.name}. Panel en construcción.")
                 else:
                     await WhatsAppService.send_message(sender_phone, f"Hola {user.name}. Tu rol ({user.role}) no tiene flujo definido.")
 
             elif msg.type in ["interactive", "button"]:
-                # Normalize button title
                 btn_title = ""
                 if msg.type == "interactive":
                     btn_title = msg.interactive.button_reply.title
@@ -62,7 +55,6 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
                 
                 print(f"🔘 Botón presionado: {btn_title} por {user.role}")
 
-                # Role-Specific Actions
                 if user.role == Role.DOCTOR:
                     if btn_title == "Revisar mi agenda del día":
                         background_tasks.add_task(process_doctor_request, sender_phone)
