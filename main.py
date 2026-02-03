@@ -2,19 +2,11 @@ from fastapi import FastAPI, Request, Response, BackgroundTasks, HTTPException
 from app.config import VERIFY_TOKEN
 from app.schemas import WSPPayload
 from app.auth.service import AuthService
-from app.auth.models import Role
-from app.workflows.doctor import DoctorWorkflow
-from app.workflows.manager import ManagerWorkflow
-from app.workflows.nurse import NurseWorkflow
+from app.services.whatsapp import WhatsAppService
+from app.workflows import doctor, manager, nurse
+from app.workflows.role_registry import get_workflow_handler
 
 app = FastAPI(title="Bot Clínica SkinMed")
-
-# Workflow dispatcher
-WORKFLOW_HANDLERS = {
-    Role.DOCTOR: DoctorWorkflow(),
-    Role.MANAGER: ManagerWorkflow(),
-    Role.HEAD_NURSE: NurseWorkflow(),
-}
 
 def extract_button_title(msg) -> str:
     """Extract button title from interactive or button message"""
@@ -44,9 +36,13 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
             if not user:
                 return {"status": "ignored", "reason": "unauthorized"}
 
-            handler = WORKFLOW_HANDLERS.get(user.role)
+            handler = get_workflow_handler(user.role)
             if not handler:
-                return {"status": "error", "reason": "no_handler_for_role"}
+                await WhatsAppService.send_message(
+                    sender_phone, 
+                    f"Lo siento, tu rol '{user.role}' no está configurado en el sistema."
+                )
+                return {"status": "error", "reason": "no_handler_for_role", "role": user.role}
 
             if msg.type == "text":
                 await handler.handle_text(user, sender_phone)
@@ -56,7 +52,7 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
                 await handler.handle_button(user, sender_phone, btn_title, background_tasks)
             
     except Exception as e:
-        print(f"❌ Error en webhook: {e}")
+        print(f"Error en webhook: {e}")
         import traceback
         traceback.print_exc()
         

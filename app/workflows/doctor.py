@@ -1,9 +1,11 @@
 from fastapi import BackgroundTasks
 from app.workflows.base import WorkflowHandler
+from app.workflows.role_registry import register_workflow
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.formatters.agenda import AgendaFormatter
 
+@register_workflow("doctor")
 class DoctorWorkflow(WorkflowHandler):
     async def handle_text(self, user, phone: str):
         await WhatsAppService.send_template(phone, user.name, "respuesta_inicial_doctores")

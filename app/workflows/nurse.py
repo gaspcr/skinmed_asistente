@@ -1,7 +1,9 @@
 from fastapi import BackgroundTasks
 from app.workflows.base import WorkflowHandler
+from app.workflows.role_registry import register_workflow
 from app.services.whatsapp import WhatsAppService
 
+@register_workflow("enfermera_jefe")
 class NurseWorkflow(WorkflowHandler):
     async def handle_text(self, user, phone: str):
         await WhatsAppService.send_message(phone, f"Hola {user.name}. Panel de enfermería en construcción.")
