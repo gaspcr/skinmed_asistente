@@ -8,7 +8,7 @@ class AgendaFormatter:
         
         msg = f"*Hola {doctor_name}*\nAgenda para hoy:\n\n"
         
-        ignorar_tipo = ["Eliminada", "Bloqueada", "Disponible", "No Viene"]
+        ignorar_tipo = ["Eliminada", "Bloqueada", "No Viene"]
         ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
         
         validos = [
@@ -31,10 +31,10 @@ class AgendaFormatter:
             
             motivo = f.get('Actividad', 'Sin motivo')
             tipo = f.get('Tipo', 'Desconocido')
-            sala = f.get('Salas::Nombre', 'Sin sala')
             
             conjunto_tag = " 🔗" if tipo.lower() == "conjunto" else ""
             
-            msg += f"*{hora}* - {paciente} - {sala}\n  📋 {motivo}{conjunto_tag}\n\n"
+            msg += f"⏰ *{hora}* — {paciente}\n"
+            msg += f"📋 {motivo}{conjunto_tag}\n"
         
         return msg
