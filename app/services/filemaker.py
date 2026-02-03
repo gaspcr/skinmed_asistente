@@ -46,7 +46,7 @@ class FileMakerService:
                 query = {
                     "query": [
                         {
-                            "Fecha": today_str,
+                            "Fecha": "02-02-2026",
                             "Recurso Humano::Nombre": name
                         }
                     ]
