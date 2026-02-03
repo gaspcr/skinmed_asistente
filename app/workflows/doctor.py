@@ -5,7 +5,7 @@ from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.formatters.agenda import AgendaFormatter
 
-@register_workflow("doctor")
+@register_workflow("medico")
 class DoctorWorkflow(WorkflowHandler):
     async def handle_text(self, user, phone: str):
         await WhatsAppService.send_template(phone, user.name, "respuesta_inicial_doctores")

@@ -3,7 +3,7 @@ from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.services.whatsapp import WhatsAppService
 
-@register_workflow("gerente")
+@register_workflow("gerencia")
 class ManagerWorkflow(WorkflowHandler):
     async def handle_text(self, user, phone: str):
         await WhatsAppService.send_message(phone, f"Hola Gerente {user.name}. Panel en construcción.")
