@@ -1,19 +1,28 @@
 from fastapi import FastAPI, Request, Response, BackgroundTasks, HTTPException
 from app.config import VERIFY_TOKEN
 from app.schemas import WSPPayload
-from app.services.filemaker import FileMakerService
-from app.services.whatsapp import WhatsAppService
 from app.auth.service import AuthService
 from app.auth.models import Role
+from app.workflows.doctor import DoctorWorkflow
+from app.workflows.manager import ManagerWorkflow
+from app.workflows.nurse import NurseWorkflow
 
 app = FastAPI(title="Bot Clínica SkinMed")
 
-async def process_doctor_request(name: str, phone: str):
-    print(f"🚀 Iniciando procesamiento para el doctor: {name}")
-    agenda_msg = await FileMakerService.get_agenda(name)
-    print(f"📤 Intentando enviar mensaje por WSP a {name} - {phone}...")
-    await WhatsAppService.send_message(phone, agenda_msg)
-    print(f"✅ Proceso finalizado con éxito")
+# Workflow dispatcher
+WORKFLOW_HANDLERS = {
+    Role.DOCTOR: DoctorWorkflow(),
+    Role.MANAGER: ManagerWorkflow(),
+    Role.HEAD_NURSE: NurseWorkflow(),
+}
+
+def extract_button_title(msg) -> str:
+    """Extract button title from interactive or button message"""
+    if msg.type == "interactive":
+        return msg.interactive.button_reply.title
+    elif msg.type == "button":
+        return msg.button.text
+    return ""
 
 @app.get("/webhook")
 async def verify(request: Request):
@@ -33,37 +42,18 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
             
             user = await AuthService.get_user_by_phone(sender_phone)
             if not user:
-                print(f"⚠️ Usuario no autorizado o no registrado: {sender_phone}")
                 return {"status": "ignored", "reason": "unauthorized"}
 
-            print(f"✅ Usuario autenticado: {user.name} ({user.role})")
+            handler = WORKFLOW_HANDLERS.get(user.role)
+            if not handler:
+                return {"status": "error", "reason": "no_handler_for_role"}
 
             if msg.type == "text":
-                if user.role == Role.DOCTOR:
-                    await WhatsAppService.send_template(sender_phone, user.name, "respuesta_inicial_doctores")
-                elif user.role == Role.MANAGER:
-                    await WhatsAppService.send_message(sender_phone, f"Hola Gerente {user.name}. Panel en construcción.")
-                else:
-                    await WhatsAppService.send_message(sender_phone, f"Hola {user.name}. Tu rol ({user.role}) no tiene flujo definido.")
-
+                await handler.handle_text(user, sender_phone)
+            
             elif msg.type in ["interactive", "button"]:
-                btn_title = ""
-                if msg.type == "interactive":
-                    btn_title = msg.interactive.button_reply.title
-                elif msg.type == "button":
-                    btn_title = msg.button.text
-                
-                print(f"🔘 Botón presionado: {btn_title} por {user.role}")
-
-                if user.role == Role.DOCTOR:
-                    if btn_title == "Revisar mi agenda del día":
-                        background_tasks.add_task(process_doctor_request, user.name, sender_phone)
-                    elif btn_title in ["Consultar cita paciente", "Consultar mis boxes"]:
-                        await WhatsAppService.send_message(sender_phone, "Estamos trabajando en esta opción 🚧")
-                    else:
-                        await WhatsAppService.send_message(sender_phone, "Opción no reconocida")
-                
-                # Add handle for other roles here if needed
+                btn_title = extract_button_title(msg)
+                await handler.handle_button(user, sender_phone, btn_title, background_tasks)
             
     except Exception as e:
         print(f"❌ Error en webhook: {e}")

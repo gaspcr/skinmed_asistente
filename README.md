@@ -79,16 +79,6 @@ role: Role  # DOCTOR | MANAGER | HEAD_NURSE
 #### `WSPPayload` (Pydantic)
 Validación de webhooks entrantes de WhatsApp.
 
-## Uso
-
-### Variables de Entorno
-```bash
-FM_USER=<usuario_filemaker>
-FM_PASS=<contraseña_filemaker>
-WSP_TOKEN=<token_whatsapp_business>
-WSP_PHONE_ID=<id_telefono_whatsapp>
-WSP_VERIFY_TOKEN=<token_verificacion_webhook>
-```
 
 ### Ejecución
 ```bash

@@ -2,7 +2,8 @@ import httpx
 from datetime import datetime, timedelta
 import pytz
 from typing import Optional
-from app.config import FM_HOST, FM_DB, FM_USER, FM_PASS, LAYOUT
+from app.config import FM_HOST, FM_DB, FM_USER, FM_PASS, LAYOUT, AUTH_LAYOUT
+from app.auth.models import User, Role
 
 class FileMakerService:
     _cached_token: Optional[str] = None
@@ -28,55 +29,10 @@ class FileMakerService:
         print(f"DEBUG: New token cached, expires at {cls._token_expires_at.strftime('%H:%M:%S')}")
         return cls._cached_token
 
-    @staticmethod
-    def parse_agenda(data: list) -> str:
-        if not data:
-            return "No hay citas agendadas para hoy."
-        
-        # DEBUG: Print available fields
-        if data:
-            print("DEBUG: Campos disponibles en primer registro:")
-            print(list(data[0]['fieldData'].keys()))
-        
-        # Fixed field name: 'Recurso Humano::Nombre' instead of 'Recurso Humano::Nombre Lista'
-        nombre_dr = data[0]['fieldData'].get('Recurso Humano::Nombre')
-        msg = f"*Hola {nombre_dr}*\nAgenda para hoy:\n\n"
-        
-        # Exclude specific types and activities
-        ignorar_tipo = ["Eliminada", "Bloqueada"]
-        ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
-        
-        validos = [
-            r for r in data 
-            if r['fieldData'].get('Tipo') not in ignorar_tipo 
-            and r['fieldData'].get('Actividad', '').upper() not in ignorar_actividad
-        ]
-        validos.sort(key=lambda x: x['fieldData']['Hora'])
-
-        if not validos:
-            return f"*{nombre_dr}*, no tienes citas agendadas hoy."
-
-        for reg in validos:
-            f = reg['fieldData']
-            hora = ":".join(f['Hora'].split(":")[:2])
-            
-            # Fixed field names with 'Pacientes::' prefix
-            nombre = f.get('Pacientes::NOMBRE', '')
-            apellido = f.get('Pacientes::APELLIDO PATERNO', '')
-            paciente = f"{nombre} {apellido}".strip() or 'Sin paciente'
-            
-            # Fixed field name: 'Actividad' instead of 'Motivo'
-            motivo = f.get('Actividad', 'Sin motivo')
-            
-            tipo = f.get('Tipo', '')
-            conjunto_tag = " 🔗" if tipo.lower() == "conjunto" else ""
-            
-            msg += f"*{hora}* - {paciente}\n  📋 {motivo}{conjunto_tag}\n\n"
-        
-        return msg
 
     @staticmethod
-    async def get_agenda(name: str) -> str:
+    async def get_agenda_raw(name: str) -> list:
+        """Get raw agenda data from FileMaker without formatting"""
         async with httpx.AsyncClient() as client:
             try:
                 tz = pytz.timezone("America/Santiago")
@@ -103,20 +59,16 @@ class FileMakerService:
                 resp = await client.post(find_url, json=query, headers=headers)
                 
                 if resp.status_code == 200:
-                    return FileMakerService.parse_agenda(resp.json()['response']['data'])
+                    return resp.json()['response']['data']
                 else:
                     print(f"DEBUG: FM Response: {resp.text}")
-                    return "No tienes agenda hoy o no se encontraron datos."
+                    return []
             except Exception as e:
                 print(f"ERROR: {e}")
-                return "Error al consultar la agenda."
+                return []
 
     @staticmethod
     async def get_user_by_phone(phone: str):
-        """Query FileMaker to get user info and role by phone number."""
-        from app.config import AUTH_LAYOUT
-        from app.auth.models import User, Role
-        
         async with httpx.AsyncClient() as client:
             try:
                 token = await FileMakerService.get_token(client)
