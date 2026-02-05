@@ -26,6 +26,9 @@ class DoctorWorkflow(WorkflowHandler):
         await WhatsAppService.send_template(phone, user.name, "respuesta_inicial_doctores_uso_interno")
     
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
+        # Debug: log the button title
+        print(f"DEBUG: Doctor workflow - Received button: '{button_title}'")
+        
         # Handle buttons from initial template (respuesta_inicial_doctores_uso_interno)
         if button_title == "Revisar agenda del día":
             background_tasks.add_task(self._send_agenda, user, phone, None)
@@ -38,16 +41,18 @@ class DoctorWorkflow(WorkflowHandler):
                 "Para revisar tu agenda en otro día, indícanos la fecha en formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
             )
         
-        elif button_title == "Enviar recado":
+        elif button_title in ["Enviar recado", "Enviar recados", "Revisar mis recados"]:
             # Send recados template to show additional options
+            print(f"DEBUG: Sending recados template for button: '{button_title}'")
             await WhatsAppService.send_template(phone, user.name, "recados_de_doctores")
         
         # Handle buttons from recados template (recados_de_doctores)
-        elif button_title in ["Agendar paciente", "Bloquear agenda (día)", "Revisar mis recados"]:
+        elif button_title in ["Agendar paciente", "Bloquear agenda (día)"]:
             await WhatsAppService.send_message(phone, "Sistema de recados en construcción 🚧")
         
         else:
-            await WhatsAppService.send_message(phone, "Opción no reconocida. Por favor intenta de nuevo.")
+            print(f"DEBUG: Unrecognized button: '{button_title}'")
+            await WhatsAppService.send_message(phone, f"Opción no reconocida: {button_title}. Por favor intenta de nuevo.")
     
     async def _handle_date_input(self, user, phone: str, message_text: str):
         """Handle user's date input for agenda lookup"""
