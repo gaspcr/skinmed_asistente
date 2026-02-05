@@ -44,7 +44,7 @@ class DoctorWorkflow(WorkflowHandler):
         elif button_title in ["Enviar recado", "Enviar recados", "Revisar mis recados"]:
             # Send recados template to show additional options
             print(f"DEBUG: Sending recados template for button: '{button_title}'")
-            await WhatsAppService.send_template(phone, user.name, "recados_de_doctores")
+            await WhatsAppService.send_template(phone, user.name, "recados_de_doctores", include_header=False, include_body=True)
         
         # Handle buttons from recados template (recados_de_doctores)
         elif button_title in ["Agendar paciente", "Bloquear agenda (día)"]:

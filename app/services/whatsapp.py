@@ -16,29 +16,60 @@ class WhatsAppService:
             await client.post(url, json=payload, headers=headers)
 
     @staticmethod
-    async def send_template(to_phone: str, nombre: str, template_name: str):
+    async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool = True, include_body: bool = False):
         url = f"https://graph.facebook.com/{META_API_VERSION}/{WSP_PHONE_ID}/messages"
         headers = {"Authorization": f"Bearer {WSP_TOKEN}"}
+        
+        template_config = {
+            "name": template_name,
+            "language": {"code": "es"}
+        }
+        
+        components = []
+        
+        # Add header component if requested
+        if include_header:
+            components.append({
+                "type": "header",
+                "parameters": [
+                    {
+                        "type": "text",
+                        "text": nombre
+                    }
+                ]
+            })
+        
+        # Add body component if requested
+        if include_body:
+            components.append({
+                "type": "body",
+                "parameters": [
+                    {
+                        "type": "text",
+                        "text": nombre
+                    }
+                ]
+            })
+        
+        # Only add components if there are any
+        if components:
+            template_config["components"] = components
+        
         payload = {
             "messaging_product": "whatsapp",
             "to": to_phone,
             "type": "template",
-            "template": {
-                "name": template_name,
-                "language": {"code": "es"},
-                "components": [
-                    {
-                        "type": "header",
-                        "parameters": [
-                            {
-                                "type": "text",
-                                "text": nombre
-                            }
-                        ]
-                    }
-                ]
-            }
+            "template": template_config
         }
+        
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
+            try:
+                resp = await client.post(url, json=payload, headers=headers)
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                print(f"ERROR: WhatsApp API returned {e.response.status_code}")
+                print(f"ERROR: Response body: {e.response.text}")
+                print(f"ERROR: Request payload: {payload}")
+                raise
+
+
