@@ -3,7 +3,7 @@ from fastapi import BackgroundTasks
 
 class WorkflowHandler(ABC):
     @abstractmethod
-    async def handle_text(self, user, phone: str):
+    async def handle_text(self, user, phone: str, message_text: str = ""):
         """Handle initial text message from user"""
         pass
     

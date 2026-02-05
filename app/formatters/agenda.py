@@ -24,14 +24,17 @@ class AgendaFormatter:
         for reg in validos:
             f = reg['fieldData']
             hora = ":".join(f['Hora'].split(":")[:2])
+            tipo = f.get('Tipo', 'Desconocido')
             
+            if tipo == "Disponible":
+                msg += f"⏰ *{hora}* — 🟢 Disponible\n"
+                continue
+
             nombre = f.get('Pacientes::NOMBRE', '')
             apellido = f.get('Pacientes::APELLIDO PATERNO', '')
             paciente = f"{nombre} {apellido}".strip() or 'Sin paciente'
             
             motivo = f.get('Actividad', 'Sin motivo')
-            tipo = f.get('Tipo', 'Desconocido')
-            
             conjunto_tag = " 🔗" if tipo.lower() == "conjunto" else ""
             
             msg += f"⏰ *{hora}* — {paciente}\n"

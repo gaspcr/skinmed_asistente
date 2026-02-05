@@ -45,7 +45,8 @@ async def webhook(payload: WSPPayload, background_tasks: BackgroundTasks):
                 return {"status": "error", "reason": "no_handler_for_role", "role": user.role}
 
             if msg.type == "text":
-                await handler.handle_text(user, sender_phone)
+                message_text = msg.text.body if msg.text and hasattr(msg.text, 'body') else ""
+                await handler.handle_text(user, sender_phone, message_text)
             
             elif msg.type in ["interactive", "button"]:
                 btn_title = extract_button_title(msg)

@@ -28,12 +28,16 @@ class FileMakerService:
 
 
     @staticmethod
-    async def get_agenda_raw(name: str) -> list:
+    async def get_agenda_raw(name: str, date: str = None) -> list:
         """Get raw agenda data from FileMaker without formatting"""
         async with httpx.AsyncClient() as client:
             try:
                 tz = pytz.timezone("America/Santiago")
-                today_str = datetime.now(tz).strftime("%m-%d-%Y")
+                
+                if date:
+                    today_str = date
+                else:
+                    today_str = datetime.now(tz).strftime("%m-%d-%Y")
                 
                 token = await FileMakerService.get_token(client)
                 
@@ -46,7 +50,7 @@ class FileMakerService:
                 query = {
                     "query": [
                         {
-                            "Fecha": "02-02-2026",
+                            "Fecha": today_str,
                             "Recurso Humano::Nombre": name
                         }
                     ]
