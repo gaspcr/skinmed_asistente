@@ -15,6 +15,7 @@ class AgendaFormatter:
             r for r in data 
             if r['fieldData'].get('Tipo') not in ignorar_tipo 
             and r['fieldData'].get('Actividad', '').upper() not in ignorar_actividad
+            and r['fieldData'].get('Hora', '00:00:00') != '00:00:00'  # Exclude 00:00 placeholder times
         ]
         validos.sort(key=lambda x: x['fieldData']['Hora'])
 

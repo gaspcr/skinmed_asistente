@@ -16,7 +16,7 @@ class WhatsAppService:
             await client.post(url, json=payload, headers=headers)
 
     @staticmethod
-    async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool = True, include_body: bool = False):
+    async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool, include_body: bool):
         url = f"https://graph.facebook.com/{META_API_VERSION}/{WSP_PHONE_ID}/messages"
         headers = {"Authorization": f"Bearer {WSP_TOKEN}"}
         
@@ -26,8 +26,7 @@ class WhatsAppService:
         }
         
         components = []
-        
-        # Add header component if requested
+
         if include_header:
             components.append({
                 "type": "header",
@@ -39,7 +38,6 @@ class WhatsAppService:
                 ]
             })
         
-        # Add body component if requested
         if include_body:
             components.append({
                 "type": "body",
@@ -51,7 +49,6 @@ class WhatsAppService:
                 ]
             })
         
-        # Only add components if there are any
         if components:
             template_config["components"] = components
         
