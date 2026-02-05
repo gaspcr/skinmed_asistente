@@ -16,7 +16,7 @@ class WhatsAppService:
             await client.post(url, json=payload, headers=headers)
 
     @staticmethod
-    async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool, include_body: bool):
+    async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool = True, include_body: bool = False):
         url = f"https://graph.facebook.com/{META_API_VERSION}/{WSP_PHONE_ID}/messages"
         headers = {"Authorization": f"Bearer {WSP_TOKEN}"}
         
