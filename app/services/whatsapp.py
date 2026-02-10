@@ -1,5 +1,13 @@
+import logging
+
 import httpx
+
 from app.config import META_API_VERSION, WSP_PHONE_ID, WSP_TOKEN
+from app.services import http as http_svc
+from app.utils.retry import con_reintentos
+
+logger = logging.getLogger(__name__)
+
 
 class WhatsAppService:
     @staticmethod
@@ -12,19 +20,34 @@ class WhatsAppService:
             "type": "text",
             "text": {"body": text}
         }
-        async with httpx.AsyncClient() as client:
-            await client.post(url, json=payload, headers=headers)
+
+        async def _enviar():
+            client = http_svc.get_client()
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code >= 500:
+                resp.raise_for_status()
+
+        try:
+            await con_reintentos(
+                _enviar,
+                max_intentos=2,
+                backoff_base=0.5,
+                excepciones_reintentables={httpx.RequestError, httpx.HTTPStatusError},
+                nombre_operacion="WhatsApp send_message",
+            )
+        except Exception as e:
+            logger.error("Error al enviar mensaje a %s: %s", to_phone, e)
 
     @staticmethod
     async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool = True, include_body: bool = False):
         url = f"https://graph.facebook.com/{META_API_VERSION}/{WSP_PHONE_ID}/messages"
         headers = {"Authorization": f"Bearer {WSP_TOKEN}"}
-        
+
         template_config = {
             "name": template_name,
             "language": {"code": "es"}
         }
-        
+
         components = []
 
         if include_header:
@@ -37,7 +60,7 @@ class WhatsAppService:
                     }
                 ]
             })
-        
+
         if include_body:
             components.append({
                 "type": "body",
@@ -48,25 +71,35 @@ class WhatsAppService:
                     }
                 ]
             })
-        
+
         if components:
             template_config["components"] = components
-        
+
         payload = {
             "messaging_product": "whatsapp",
             "to": to_phone,
             "type": "template",
             "template": template_config
         }
-        
-        async with httpx.AsyncClient() as client:
-            try:
-                resp = await client.post(url, json=payload, headers=headers)
+
+        async def _enviar():
+            client = http_svc.get_client()
+            resp = await client.post(url, json=payload, headers=headers)
+            if resp.status_code >= 500:
                 resp.raise_for_status()
-            except httpx.HTTPStatusError as e:
-                print(f"ERROR: WhatsApp API returned {e.response.status_code}")
-                print(f"ERROR: Response body: {e.response.text}")
-                print(f"ERROR: Request payload: {payload}")
-                raise
+            elif resp.status_code >= 400:
+                logger.error(
+                    "WhatsApp API retorno %d: %s",
+                    resp.status_code, resp.text
+                )
 
-
+        try:
+            await con_reintentos(
+                _enviar,
+                max_intentos=2,
+                backoff_base=0.5,
+                excepciones_reintentables={httpx.RequestError, httpx.HTTPStatusError},
+                nombre_operacion="WhatsApp send_template",
+            )
+        except Exception as e:
+            logger.error("Error al enviar template '%s' a %s: %s", template_name, to_phone, e)

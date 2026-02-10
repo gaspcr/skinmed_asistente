@@ -1,104 +1,161 @@
+import logging
+from datetime import datetime
+
 import httpx
-from datetime import datetime, timedelta
 import pytz
-from typing import Optional
+
 from app.config import FM_HOST, FM_DB, FM_USER, FM_PASS, AGENDA_LAYOUT, AUTH_LAYOUT
 from app.auth.models import User
+from app.services import redis as redis_svc
+from app.services import http as http_svc
+from app.exceptions import ServicioNoDisponibleError
+from app.utils.retry import con_reintentos
+
+logger = logging.getLogger(__name__)
+
+
+def _es_sin_registros(resp: httpx.Response) -> bool:
+    """Verifica si la respuesta de FileMaker indica 'sin registros encontrados'."""
+    try:
+        body = resp.json()
+        code = body.get('messages', [{}])[0].get('code', '')
+        return code == '401'
+    except Exception:
+        return False
+
 
 class FileMakerService:
-    _cached_token: Optional[str] = None
-    _token_expires_at: Optional[datetime] = None
-    
     @classmethod
-    async def get_token(cls, client: httpx.AsyncClient, force_refresh: bool = False) -> str:
-        now = datetime.now()
-        
-        if not force_refresh and cls._cached_token and cls._token_expires_at:
-            if now < cls._token_expires_at:
-                return cls._cached_token
-        
-        url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions"
-        resp = await client.post(url, auth=(FM_USER, FM_PASS), json={})
-        resp.raise_for_status()
-        
-        cls._cached_token = resp.json()['response']['token']
-        cls._token_expires_at = now + timedelta(minutes=14)
-        
-        return cls._cached_token
+    async def get_token(cls, force_refresh: bool = False) -> str:
+        if not force_refresh:
+            cached = await redis_svc.get("fm:token")
+            if cached:
+                return cached
 
+        async def _solicitar_token():
+            client = http_svc.get_client()
+            url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions"
+            resp = await client.post(url, auth=(FM_USER, FM_PASS), json={})
+            resp.raise_for_status()
+            return resp.json()['response']['token']
+
+        token = await con_reintentos(
+            _solicitar_token,
+            max_intentos=3,
+            backoff_base=1.0,
+            nombre_operacion="FileMaker get_token",
+        )
+
+        await redis_svc.set("fm:token", token, ttl=840)  # 14 minutos
+        return token
+
+    @classmethod
+    async def _fm_find(cls, layout: str, query: dict, intentar_reauth: bool = True) -> httpx.Response:
+        """
+        Ejecuta una busqueda en FileMaker con reintento automatico de token.
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{layout}/_find"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+
+        resp = await client.post(url, json=query, headers=headers)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_find(layout, query, intentar_reauth=False)
+
+        return resp
+
+    @staticmethod
+    async def _parsear_respuesta_find(resp: httpx.Response, contexto: str) -> list:
+        """Parsea respuesta de _fm_find, diferenciando datos vacios de errores."""
+        if resp.status_code == 200:
+            return resp.json()['response']['data']
+
+        if resp.status_code == 500 and _es_sin_registros(resp):
+            return []
+
+        raise ServicioNoDisponibleError("FileMaker", f"{contexto}: HTTP {resp.status_code}")
 
     @staticmethod
     async def get_agenda_raw(name: str, date: str = None) -> list:
-        """Get raw agenda data from FileMaker without formatting"""
-        async with httpx.AsyncClient() as client:
-            try:
-                tz = pytz.timezone("America/Santiago")
-                
-                if date:
-                    today_str = date
-                else:
-                    today_str = datetime.now(tz).strftime("%m-%d-%Y")
-                
-                token = await FileMakerService.get_token(client)
-                
-                find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{AGENDA_LAYOUT}/_find"
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {token}"
+        """Obtiene datos crudos de agenda desde FileMaker."""
+        tz = pytz.timezone("America/Santiago")
+        today_str = date if date else datetime.now(tz).strftime("%m-%d-%Y")
+
+        query = {
+            "query": [
+                {
+                    "Fecha": today_str,
+                    "Recurso Humano::Nombre": name,
                 }
-                
-                query = {
-                    "query": [
-                        {
-                            "Fecha": today_str,
-                            "Recurso Humano::Nombre": name
-                        }
-                    ]
-                }
-                
-                resp = await client.post(find_url, json=query, headers=headers)
-                
-                if resp.status_code == 200:
-                    return resp.json()['response']['data']
-                else:
-                    return []
-            except Exception as e:
-                return []
+            ]
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(AGENDA_LAYOUT, query)
+            return await FileMakerService._parsear_respuesta_find(resp, "get_agenda_raw")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker get_agenda_raw",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al obtener agenda: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
 
     @staticmethod
     async def get_user_by_phone(phone: str):
-        async with httpx.AsyncClient() as client:
-            try:
-                token = await FileMakerService.get_token(client)
-                
-                find_url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{AUTH_LAYOUT}/_find"
-                headers = {
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {token}"
+        """Busca usuario por telefono en FileMaker."""
+        query = {
+            "query": [
+                {
+                    "Telefono": phone,
                 }
-                
-                query = {
-                    "query": [
-                        {
-                            "Telefono": phone
-                        }
-                    ]
-                }
-                
-                resp = await client.post(find_url, json=query, headers=headers)
-                
-                if resp.status_code == 200:
-                    data = resp.json()['response']['data']
-                    if data:
-                        user_data = data[0]['fieldData']
-                        nombre = user_data.get('Nombre')
-                        rol_str = user_data.get('ROL', '').lower().strip()
-                        
-                        return User(phone=phone, name=nombre, role=rol_str)
-                    else:
-                        return None
-                else:
-                    return None
-            except Exception as e:
-                print(f"ERROR al buscar usuario: {e}")
+            ]
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(AUTH_LAYOUT, query)
+
+            if resp.status_code == 200:
+                data = resp.json()['response']['data']
+                if data:
+                    user_data = data[0]['fieldData']
+                    nombre = user_data.get('Nombre')
+                    rol_str = user_data.get('ROL', '').lower().strip()
+                    return User(phone=phone, name=nombre, role=rol_str)
                 return None
+
+            if resp.status_code == 500 and _es_sin_registros(resp):
+                return None
+
+            raise ServicioNoDisponibleError("FileMaker", f"get_user_by_phone: HTTP {resp.status_code}")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker get_user_by_phone",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al buscar usuario: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")

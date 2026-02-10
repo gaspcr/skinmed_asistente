@@ -2,3 +2,4 @@ pytz
 httpx
 fastapi
 uvicorn
+redis
