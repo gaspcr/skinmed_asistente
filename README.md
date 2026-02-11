@@ -8,30 +8,37 @@ Este bot proporciona un asistente virtual para el personal médico de la clínic
 - Consultar agendas médicas del día
 - Verificar información de pacientes
 - Gestionar boxes y recursos
-- Control de acceso basado en roles (Doctores, Gerentes, Enfermeras)
+- Control de acceso basado en roles (médicos, gerencia, enfermería)
 
 ## Arquitectura
 
 ```
 app/
 ├── services/          # Servicios de integración externa
-│   ├── filemaker.py   # API de FileMaker (base de datos)
-│   └── whatsapp.py    # API de WhatsApp Business
+│   ├── filemaker.py   # API de FileMaker con caché de tokens (Redis)
+│   ├── whatsapp.py    # API de WhatsApp Business con retries
+│   ├── redis.py       # Cliente Redis para caché y rate limiting
+│   └── http.py        # Cliente HTTP compartido con connection pooling
 ├── auth/              # Sistema de autenticación
-│   ├── models.py      # Modelos de Usuario y Roles
-│   └── service.py     # Lógica de autenticación
+│   ├── models.py      # Modelo de Usuario
+│   └── service.py     # Lógica de autenticación (caché 5 min en Redis)
 ├── workflows/         # Workflows basados en roles
 │   ├── base.py        # Clase base WorkflowHandler
-│   ├── doctor.py      # Workflow para doctores
-│   ├── manager.py     # Workflow para gerentes
-│   ├── nurse.py       # Workflow para enfermeras
-│   └── role_registry.py # Registro de workflows por rol
+│   ├── doctor.py      # Workflow para médicos (implementado)
+│   ├── manager.py     # Workflow para gerencia (stub)
+│   ├── nurse.py       # Workflow para enfermería (stub)
+│   └── role_registry.py # Sistema de registro con decoradores
 ├── formatters/        # Formateadores de datos
 │   └── agenda.py      # Formateador de agenda médica
-├── config.py          # Configuración y variables de entorno
+├── utils/             # Utilidades
+│   └── retry.py       # Utilidad de reintentos con backoff exponencial
+├── middleware.py      # Verificación HMAC-SHA256 de webhooks
+├── exceptions.py      # Excepciones personalizadas
+├── logging_config.py  # Configuración de logging estructurado
+├── config.py          # Configuración y validación de variables de entorno
 └── schemas.py         # Modelos Pydantic para validación
 
-main.py                # Punto de entrada FastAPI
+main.py                # Punto de entrada FastAPI con lifespan
 verify_roles.py        # Script de verificación de roles
 ```
 
@@ -39,6 +46,7 @@ verify_roles.py        # Script de verificación de roles
 
 ### Requisitos
 - Python 3.8+
+- Redis (para caché y rate limiting)
 - Acceso a FileMaker Server con Data API habilitada
 - Cuenta de WhatsApp Business API
 
@@ -51,106 +59,172 @@ pip install -r requirements.txt
 
 2. **Variables de entorno:**
 Crear archivo `.env` con las siguientes variables:
+
+**Requeridas:**
 ```bash
 # FileMaker Configuration
-FILEMAKER_URL=https://your-filemaker-server.com
-FILEMAKER_DATABASE=your-database-name
-FILEMAKER_USERNAME=your-username
-FILEMAKER_PASSWORD=your-password
+FM_USER=your-username
+FM_PASS=your-password
 
 # WhatsApp Configuration
-WHATSAPP_API_URL=https://graph.facebook.com/v18.0
-WHATSAPP_TOKEN=your-whatsapp-token
-WHATSAPP_PHONE_NUMBER_ID=your-phone-number-id
-
-# Webhook Verification
-VERIFY_TOKEN=your-webhook-verify-token
+WSP_TOKEN=your-whatsapp-token
+WSP_PHONE_ID=your-phone-number-id
+WSP_VERIFY_TOKEN=your-webhook-verify-token
+WSP_APP_SECRET=your-app-secret
 ```
 
-3. **Ejecutar servidor:**
+**Opcionales (con defaults):**
+```bash
+# FileMaker (defaults configurados)
+FM_HOST=fmsk.skinmed.cl
+FM_DB=Agenda%20v20b
+FM_AGENDA_LAYOUT=ListadoDeHoras_dapi
+FM_AUTH_LAYOUT=AuthUsuarios_dapi
+
+# WhatsApp
+META_API_VERSION=v24.0
+
+# Redis
+REDIS_URL=redis://localhost:6379/0
+
+# Logging
+LOG_LEVEL=INFO
+```
+
+3. **Iniciar Redis:**
+```bash
+redis-server
+```
+
+4. **Ejecutar servidor:**
 ```bash
 uvicorn main:app --reload
 ```
 
 ## Funcionalidades
 
-### 🔐 Autenticación
-- Sistema de roles basado en FileMaker
+### 🔐 Autenticación y Seguridad
+- Sistema de roles dinámico basado en FileMaker
 - Verificación automática por número de teléfono
-- Acceso diferenciado según rol (Doctor/Gerente/Enfermera)
+- **Caché de usuarios** en Redis (5 minutos)
+- **Verificación HMAC-SHA256** de webhooks de WhatsApp
+- **Rate limiting**: 30 mensajes por minuto por teléfono
 
 ### 📅 Gestión de Agenda
-- Consulta de agenda diaria del doctor
+- Consulta de agenda diaria del médico
 - Filtrado de citas válidas (excluye eliminadas/bloqueadas)
 - Formato optimizado para WhatsApp
 
-### 🚀 Optimizaciones
-- **Caché de tokens**: Reutilización de tokens de FileMaker (14 min)
-- **Respuestas asíncronas**: Procesamiento en background
-- **Rate limiting**: Prevención de sobrecarga de APIs
-- **Arquitectura modular**: Workflows separados por rol para fácil extensibilidad
+### 🚀 Optimizaciones y Resiliencia
+- **Caché de tokens FileMaker**: Redis con TTL de 14 minutos
+- **Connection pooling**: Cliente HTTP compartido (httpx AsyncClient)
+- **Reintentos automáticos**: Con backoff exponencial en servicios externos
+- **Lifespan management**: Inicialización y cierre limpio de recursos
+- **Health checks**: Endpoint `/health` para monitoreo
+- **Logging estructurado**: Configuración centralizada con niveles
 
 ## Arquitectura de Workflows
 
-El sistema utiliza un **patrón de dispatcher basado en roles** para enrutar mensajes al workflow apropiado:
+El sistema utiliza un **patrón de registro basado en decoradores** para enrutar mensajes al workflow apropiado:
+
+### Sistema de Registro con Decoradores
+
+Los workflows se registran automáticamente usando decoradores:
+
+```python
+from app.workflows.base import WorkflowHandler
+from app.workflows.role_registry import register_workflow
+
+@register_workflow("medico")
+class DoctorWorkflow(WorkflowHandler):
+    async def handle_text(self, user, phone, message_text):
+        # Implementación
+        pass
+    
+    async def handle_button(self, user, phone, button_title, background_tasks):
+        # Implementación
+        pass
+```
 
 ### Componentes Clave
 
 #### `WorkflowHandler` (Base Class)
 Clase abstracta que define la interfaz para todos los workflows:
-- `handle_text()`: Procesa mensajes de texto
-- `handle_button()`: Procesa interacciones con botones
+- `handle_text(user, phone, message_text)`: Procesa mensajes de texto
+- `handle_button(user, phone, button_title, background_tasks)`: Procesa interacciones con botones
 
 #### Role Registry
-Sistema de registro que mapea roles a sus respectivos handlers:
+Sistema de registro automático que mapea roles a sus respectivos handlers:
 ```python
 from app.workflows.role_registry import get_workflow_handler
 
-handler = get_workflow_handler(user.role)
-await handler.handle_button(user, phone, button_title, background_tasks)
+handler = get_workflow_handler(user.role)  # user.role = "medico" → DoctorWorkflow
+await handler.handle_text(user, phone, message_text)
 ```
 
-### Workflows por Rol
+**Funciones útiles:**
+- `get_workflow_handler(role)`: Obtiene instancia del handler
+- `get_registered_roles()`: Lista todos los roles registrados
+- `is_role_registered(role)`: Verifica si un rol está registrado
 
-#### Doctor Workflow (`doctor.py`)
+### Workflows Implementados
+
+#### Doctor Workflow (`doctor.py`) ✅
+- **Registro**: `@register_workflow("medico")`
 - Consulta de agenda del día
 - Información detallada de pacientes
-- Gestión de citas
+- Gestión multi-paso con estado en Redis (TTL 30 min)
 
-#### Manager Workflow (`manager.py`)
-- Reportes administrativos
-- Gestión de recursos
-- Supervisión de operaciones
+#### Manager Workflow (`manager.py`) 🚧
+- **Registro**: `@register_workflow("gerencia")`
+- Stub básico (pendiente de implementación completa)
 
-#### Nurse Workflow (`nurse.py`)
-- Información de boxes
-- Coordinación de pacientes
-- Soporte operativo
+#### Nurse Workflow (`nurse.py`) 🚧
+- **Registro**: `@register_workflow("enfermeria")`
+- Stub básico (pendiente de implementación completa)
 
 ## Servicios Principales
 
-### `FileMakerService`
-Gestiona toda la comunicación con la base de datos FileMaker.
+### `RedisService` (`services/redis.py`)
+Cliente Redis asíncrono para estado y caché.
 
 **Métodos:**
-- `get_token()`: Obtiene/reutiliza token de autenticación (caché 14 min)
-- `get_user_by_phone()`: Consulta información de usuario
-- `get_agenda()`: Obtiene agenda del día
-- `execute_script()`: Ejecuta scripts de FileMaker
+- `init(url)`: Inicializa conexión
+- `close()`: Cierra conexión
+- `get(key)`, `set(key, value, ttl)`: Operaciones básicas
+- `verificar_rate_limit(key, limite, ventana_ttl)`: Rate limiting
 
-### `WhatsAppService`
-Maneja el envío de mensajes y plantillas de WhatsApp.
+### `HTTPService` (`services/http.py`)
+Cliente HTTP compartido con connection pooling.
 
 **Métodos:**
-- `send_message()`: Envío de mensajes de texto
-- `send_template()`: Envío de plantillas aprobadas
-- `send_interactive_buttons()`: Envío de botones interactivos
+- `init()`: Inicializa cliente httpx
+- `close()`: Cierra conexiones
+- `get_client()`: Obtiene instancia del cliente
 
-### `AuthService`
+### `FileMakerService` (`services/filemaker.py`)
+Gestiona toda la comunicación con FileMaker Data API.
+
+**Métodos:**
+- `get_token()`: Obtiene/reutiliza token (caché Redis 14 min)
+- `get_user_by_phone(phone)`: Consulta usuario desde `AuthUsuarios_dapi`
+- `get_agenda(doctor_name)`: Obtiene agenda desde `ListadoDeHoras_dapi`
+- **Auto-retry**: Reintenta en 401 (token expirado) y errores de conexión
+
+### `WhatsAppService` (`services/whatsapp.py`)
+Maneja el envío de mensajes a WhatsApp Business API.
+
+**Métodos:**
+- `send_message(to, text)`: Envío de mensajes de texto
+- `send_template(to, template_name, language, components)`: Plantillas
+- `send_interactive_buttons(to, body_text, buttons)`: Botones interactivos
+- **Auto-retry**: Reintenta en 5xx y errores de conexión
+
+### `AuthService` (`auth/service.py`)
 Gestiona la autenticación y autorización de usuarios.
 
 **Métodos:**
-- `get_user_by_phone()`: Resuelve usuario a partir de teléfono
+- `get_user_by_phone(phone)`: Resuelve usuario (caché Redis 5 min)
 
 ## Modelos de Datos
 
@@ -158,21 +232,27 @@ Gestiona la autenticación y autorización de usuarios.
 ```python
 phone: str
 name: str
-role: Role  # DOCTOR | MANAGER | HEAD_NURSE
+role: str  # Rol dinámico desde FileMaker (validado por registry)
 ```
 
 ### `WSPPayload` (Pydantic)
 Validación de webhooks entrantes de WhatsApp.
 
-### `Role` (Enum)
-```python
-class Role(str, Enum):
-    DOCTOR = "Doctor"
-    MANAGER = "Manager"
-    HEAD_NURSE = "Head Nurse"
-```
-
 ## API Endpoints
+
+### `GET /health`
+Health check para monitoring (Railway/similar).
+
+**Respuesta:**
+```json
+{
+  "status": "ok",
+  "servicios": {
+    "redis": "ok",
+    "http_client": "ok"
+  }
+}
+```
 
 ### `GET /webhook`
 Verificación de webhook de WhatsApp.
@@ -185,20 +265,26 @@ Verificación de webhook de WhatsApp.
 ### `POST /webhook`
 Recepción de mensajes entrantes de WhatsApp.
 
+**Seguridad:**
+- Verificación HMAC-SHA256 de firma de webhook
+- Rate limiting (30 msg/min por teléfono)
+
 **Body:** `WSPPayload` con estructura de webhook de WhatsApp
 
 ## Flujo de Usuario
 
-1. **Usuario envía mensaje** → Sistema verifica teléfono en FileMaker
-2. **Si autorizado** → Obtiene workflow handler según rol
-3. **Dispatcher enruta** → Mensaje procesado por workflow específico
-4. **Usuario selecciona opción** → Bot procesa según permisos
-5. **Respuesta** → Información solicitada o mensaje de trabajo en progreso
+1. **Usuario envía mensaje** → WhatsApp webhook entrega mensaje
+2. **Verificación HMAC** → Middleware valida firma del webhook
+3. **Rate limiting** → Verifica límites por teléfono
+4. **Autenticación** → AuthService busca usuario en FileMaker (caché Redis 5 min)
+5. **Dispatch a workflow** → `get_workflow_handler(user.role)` obtiene handler
+6. **Procesamiento** → Workflow procesa mensaje según tipo (texto/botón)
+7. **Respuesta** → WhatsAppService envía respuesta
 
 ## Layouts de FileMaker
 
 - `AuthUsuarios_dapi`: Autenticación (Nombre, ROL, Telefono)
-- `Numeros_dapi`: Agenda médica (Fecha, Hora, Paciente, etc.)
+- `ListadoDeHoras_dapi`: Agenda médica (Fecha, Hora, Paciente, Estado, etc.)
 
 ## Extensibilidad
 
@@ -207,9 +293,11 @@ Recepción de mensajes entrantes de WhatsApp.
 1. **Crear workflow handler** en `app/workflows/nuevo_rol.py`:
 ```python
 from app.workflows.base import WorkflowHandler
+from app.workflows.role_registry import register_workflow
 
+@register_workflow("nuevo_rol")  # Debe coincidir con campo ROL en FileMaker
 class NuevoRolWorkflow(WorkflowHandler):
-    async def handle_text(self, user, phone):
+    async def handle_text(self, user, phone, message_text):
         # Implementar lógica
         pass
     
@@ -218,17 +306,23 @@ class NuevoRolWorkflow(WorkflowHandler):
         pass
 ```
 
-2. **Registrar en role_registry.py**:
+2. **Importar en `app/workflows/__init__.py`**:
 ```python
-from app.workflows.nuevo_rol import NuevoRolWorkflow
-
-WORKFLOW_REGISTRY = {
-    Role.NUEVO_ROL: NuevoRolWorkflow(),
-    # ... otros roles
-}
+from . import nuevo_rol  # Auto-registra al importar
 ```
 
-3. **Actualizar enum de Roles** en `app/auth/models.py`
+¡Eso es todo! El decorador `@register_workflow` registra automáticamente el workflow.
+
+## Manejo de Errores
+
+### Excepciones Personalizadas
+- `ServicioNoDisponibleError`: Indica que un servicio externo no está disponible
+  - Se captura en `main.py` para enviar mensaje amigable al usuario
+
+### Logging
+- Configuración centralizada en `logging_config.py`
+- Nivel configurable vía `LOG_LEVEL` env var
+- Logs estructurados para facilitar debugging
 
 ## Herramientas de Desarrollo
 
@@ -237,6 +331,15 @@ Script para verificar la configuración de roles:
 ```bash
 python verify_roles.py
 ```
+
+## Despliegue
+
+El bot está diseñado para desplegarse fácilmente en plataformas como Railway, Render, o similar.
+
+**Requisitos:**
+- Servicio Redis (Railway provee add-ons)
+- Variables de entorno configuradas
+- Health check en `/health`
 
 ## Licencia
 Ver archivo `LICENSE`
