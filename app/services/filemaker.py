@@ -4,14 +4,23 @@ from datetime import datetime
 import httpx
 import pytz
 
-from app.config import FM_HOST, FM_DB, FM_USER, FM_PASS, AGENDA_LAYOUT, AUTH_LAYOUT
+from app.config import get_settings
 from app.auth.models import User
 from app.services import redis as redis_svc
 from app.services import http as http_svc
 from app.exceptions import ServicioNoDisponibleError
 from app.utils.retry import con_reintentos
+from app.utils.circuit_breaker import CircuitBreaker, CircuitBreakerAbierto
 
 logger = logging.getLogger(__name__)
+
+# Circuit breaker para proteger llamadas a FileMaker
+_fm_circuit_breaker = CircuitBreaker(
+    nombre="filemaker",
+    umbral_fallos=5,
+    timeout_recuperacion=30.0,
+    excepciones_monitoreadas=(httpx.RequestError, httpx.HTTPStatusError, ServicioNoDisponibleError),
+)
 
 
 def _es_sin_registros(resp: httpx.Response) -> bool:
@@ -33,9 +42,10 @@ class FileMakerService:
                 return cached
 
         async def _solicitar_token():
+            settings = get_settings()
             client = http_svc.get_client()
-            url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/sessions"
-            resp = await client.post(url, auth=(FM_USER, FM_PASS), json={})
+            url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/sessions"
+            resp = await client.post(url, auth=(settings.FM_USER, settings.FM_PASS), json={})
             resp.raise_for_status()
             return resp.json()['response']['token']
 
@@ -55,15 +65,17 @@ class FileMakerService:
         Ejecuta una busqueda en FileMaker con reintento automatico de token.
         Si recibe HTTP 401, refresca el token y reintenta una vez.
         """
+        settings = get_settings()
         client = http_svc.get_client()
         token = await cls.get_token()
-        url = f"https://{FM_HOST}/fmi/data/v1/databases/{FM_DB}/layouts/{layout}/_find"
+        url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/layouts/{layout}/_find"
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
 
-        resp = await client.post(url, json=query, headers=headers)
+        async with _fm_circuit_breaker:
+            resp = await client.post(url, json=query, headers=headers)
 
         if resp.status_code == 401 and intentar_reauth:
             logger.info("Token FM expirado, refrescando...")
@@ -86,6 +98,7 @@ class FileMakerService:
     @staticmethod
     async def get_agenda_raw(name: str, date: str = None) -> list:
         """Obtiene datos crudos de agenda desde FileMaker."""
+        settings = get_settings()
         tz = pytz.timezone("America/Santiago")
         today_str = date if date else datetime.now(tz).strftime("%m-%d-%Y")
 
@@ -99,7 +112,7 @@ class FileMakerService:
         }
 
         async def _buscar():
-            resp = await FileMakerService._fm_find(AGENDA_LAYOUT, query)
+            resp = await FileMakerService._fm_find(settings.FM_AGENDA_LAYOUT, query)
             return await FileMakerService._parsear_respuesta_find(resp, "get_agenda_raw")
 
         try:
@@ -111,6 +124,8 @@ class FileMakerService:
             )
         except ServicioNoDisponibleError:
             raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
         except httpx.RequestError as e:
             raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
         except Exception as e:
@@ -120,6 +135,7 @@ class FileMakerService:
     @staticmethod
     async def get_user_by_phone(phone: str):
         """Busca usuario por telefono en FileMaker."""
+        settings = get_settings()
         query = {
             "query": [
                 {
@@ -129,7 +145,7 @@ class FileMakerService:
         }
 
         async def _buscar():
-            resp = await FileMakerService._fm_find(AUTH_LAYOUT, query)
+            resp = await FileMakerService._fm_find(settings.FM_AUTH_LAYOUT, query)
 
             if resp.status_code == 200:
                 data = resp.json()['response']['data']
@@ -154,6 +170,8 @@ class FileMakerService:
             )
         except ServicioNoDisponibleError:
             raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
         except httpx.RequestError as e:
             raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
         except Exception as e:

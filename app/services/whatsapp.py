@@ -2,7 +2,7 @@ import logging
 
 import httpx
 
-from app.config import META_API_VERSION, WSP_PHONE_ID, WSP_TOKEN
+from app.config import get_settings
 from app.services import http as http_svc
 from app.utils.retry import con_reintentos
 
@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 class WhatsAppService:
     @staticmethod
     async def send_message(to_phone: str, text: str):
-        url = f"https://graph.facebook.com/{META_API_VERSION}/{WSP_PHONE_ID}/messages"
-        headers = {"Authorization": f"Bearer {WSP_TOKEN}"}
+        settings = get_settings()
+        url = f"https://graph.facebook.com/{settings.META_API_VERSION}/{settings.WSP_PHONE_ID}/messages"
+        headers = {"Authorization": f"Bearer {settings.WSP_TOKEN}"}
         payload = {
             "messaging_product": "whatsapp",
             "to": to_phone,
@@ -40,8 +41,9 @@ class WhatsAppService:
 
     @staticmethod
     async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool = True, include_body: bool = False):
-        url = f"https://graph.facebook.com/{META_API_VERSION}/{WSP_PHONE_ID}/messages"
-        headers = {"Authorization": f"Bearer {WSP_TOKEN}"}
+        settings = get_settings()
+        url = f"https://graph.facebook.com/{settings.META_API_VERSION}/{settings.WSP_PHONE_ID}/messages"
+        headers = {"Authorization": f"Bearer {settings.WSP_TOKEN}"}
 
         template_config = {
             "name": template_name,

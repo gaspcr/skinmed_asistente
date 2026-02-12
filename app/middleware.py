@@ -1,17 +1,24 @@
 """
-Dependencia de verificacion de firma HMAC-SHA256 para el webhook de WhatsApp.
-Meta firma cada request con X-Hub-Signature-256 usando el App Secret.
+Middleware de seguridad y verificacion para la aplicacion.
+
+Incluye:
+- Verificacion de firma HMAC-SHA256 para webhooks de WhatsApp
+- Headers de seguridad HTTP
 """
 import hashlib
 import hmac
 import logging
 
-from fastapi import HTTPException, Request
+from fastapi import HTTPException, Request, Response
+from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.config import WSP_APP_SECRET
+from app.config import get_settings
 from app.schemas import WSPPayload
 
 logger = logging.getLogger(__name__)
+
+
+# --- HMAC Webhook Verification ---
 
 
 async def verify_signature(request: Request) -> WSPPayload:
@@ -34,7 +41,7 @@ async def verify_signature(request: Request) -> WSPPayload:
     firma_recibida = signature_header[7:]
 
     firma_esperada = hmac.new(
-        WSP_APP_SECRET.encode("utf-8"),
+        get_settings().WSP_APP_SECRET.encode("utf-8"),
         body,
         hashlib.sha256,
     ).hexdigest()
@@ -45,3 +52,25 @@ async def verify_signature(request: Request) -> WSPPayload:
 
     payload = WSPPayload.model_validate_json(body)
     return payload
+
+
+# --- Security Headers Middleware ---
+
+
+class SecurityHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Agrega headers de seguridad HTTP a todas las respuestas.
+    Previene ataques comunes como clickjacking, MIME sniffing, y XSS.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        response: Response = await call_next(request)
+
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        return response

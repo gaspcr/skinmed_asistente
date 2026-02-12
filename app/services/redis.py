@@ -18,7 +18,7 @@ async def init(url: str):
     global _redis
     _redis = aioredis.from_url(url, decode_responses=True)
     await _redis.ping()
-    logger.info("Conexion a Redis establecida: %s", url)
+    logger.info("Conexion a Redis establecida")
 
 
 async def close():

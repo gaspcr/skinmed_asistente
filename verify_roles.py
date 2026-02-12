@@ -3,7 +3,10 @@ Script de verificación: Sistema de roles dinámico
 Verifica que todos los workflows estén correctamente registrados
 """
 import sys
-sys.path.insert(0, '/Users/rodrigougartekunisky/Desktop/skinmed_asistente')
+import os
+
+# Asegurar que el directorio raiz está en el path
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Importar workflows para activar decoradores
 from app.workflows import doctor, manager, nurse
@@ -27,7 +30,7 @@ def test_role_registry():
     print(f"Total: {len(registered_roles)} roles")
     print()
     
-    expected_roles = ['doctor', 'gerente', 'enfermera_jefe']
+    expected_roles = ['medico', 'gerencia', 'enfermeria']
     missing_roles = [r for r in expected_roles if r not in registered_roles]
     
     if missing_roles:
@@ -63,10 +66,10 @@ def test_role_registry():
     print("-" * 60)
     
     # Rol válido
-    if is_role_registered("doctor"):
-        print("✅ 'doctor' está registrado")
+    if is_role_registered("medico"):
+        print("✅ 'medico' está registrado")
     else:
-        print("❌ 'doctor' NO está registrado")
+        print("❌ 'medico' NO está registrado")
         return False
     
     # Rol inválido
@@ -77,8 +80,8 @@ def test_role_registry():
         return False
     
     # Normalización (mayúsculas/minúsculas)
-    if is_role_registered("DOCTOR"):
-        print("✅ Normalización funciona ('DOCTOR' -> 'doctor')")
+    if is_role_registered("MEDICO"):
+        print("✅ Normalización funciona ('MEDICO' -> 'medico')")
     else:
         print("❌ Normalización falló")
         return False

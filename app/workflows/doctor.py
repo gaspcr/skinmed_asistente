@@ -6,9 +6,9 @@ from fastapi import BackgroundTasks
 
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
+from app.workflows import state as workflow_state
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
-from app.services import redis as redis_svc
 from app.formatters.agenda import AgendaFormatter
 from app.exceptions import ServicioNoDisponibleError
 
@@ -19,9 +19,9 @@ class DoctorWorkflow(WorkflowHandler):
 
     async def handle_text(self, user, phone: str, message_text: str = ""):
         # Verificar si el usuario esta en un flujo multi-paso
-        state = await redis_svc.get(f"workflow:state:{phone}")
-        if state:
-            if state == "waiting_for_date":
+        step = await workflow_state.get_step(phone)
+        if step:
+            if step == "waiting_for_date":
                 await self._handle_date_input(user, phone, message_text)
                 return
 
@@ -36,7 +36,7 @@ class DoctorWorkflow(WorkflowHandler):
             background_tasks.add_task(self._send_agenda, user, phone, None)
 
         elif button_title == "Revisar agenda otro día":
-            await redis_svc.set(f"workflow:state:{phone}", "waiting_for_date", ttl=1800)
+            await workflow_state.set_state(phone, "waiting_for_date")
             await WhatsAppService.send_message(
                 phone,
                 "Para revisar tu agenda en otro día, indícanos la fecha en formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
@@ -52,7 +52,7 @@ class DoctorWorkflow(WorkflowHandler):
 
         else:
             logger.warning("Boton no reconocido: '%s'", button_title)
-            await WhatsAppService.send_message(phone, f"Opción no reconocida: {button_title}. Por favor intenta de nuevo.")
+            await WhatsAppService.send_message(phone, "Opción no reconocida. Por favor intenta de nuevo.")
 
     async def _handle_date_input(self, user, phone: str, message_text: str):
         """Procesa la entrada de fecha del usuario para consulta de agenda"""
@@ -73,7 +73,7 @@ class DoctorWorkflow(WorkflowHandler):
             date_obj = datetime.strptime(f"{day}-{month}-{full_year}", "%d-%m-%Y")
             filemaker_date = date_obj.strftime("%m-%d-%Y")
 
-            await redis_svc.delete(f"workflow:state:{phone}")
+            await workflow_state.clear_state(phone)
             await self._send_agenda(user, phone, filemaker_date)
 
         except ValueError:
@@ -81,7 +81,7 @@ class DoctorWorkflow(WorkflowHandler):
                 phone,
                 "❌ Fecha inválida. Verifica que el día y mes sean correctos.\n\nEjemplo: 05-02-26"
             )
-            await redis_svc.delete(f"workflow:state:{phone}")
+            await workflow_state.clear_state(phone)
 
     async def _send_agenda(self, user, phone: str, date: str = None):
         """Envia agenda del dia o de una fecha especifica"""
