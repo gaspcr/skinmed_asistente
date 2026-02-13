@@ -52,35 +52,39 @@ def setup_logging(log_level: str = "INFO", environment: str = "production"):
     stdout_handler.setFormatter(formatter)
     raiz.addHandler(stdout_handler)
 
-    # --- Handler: archivo con rotacion diaria ---
-    os.makedirs(LOG_DIR, exist_ok=True)
-    log_file = os.path.join(LOG_DIR, "app.log")
+    # --- Handler: archivos con rotacion diaria (best-effort) ---
+    try:
+        os.makedirs(LOG_DIR, exist_ok=True)
 
-    file_handler = TimedRotatingFileHandler(
-        filename=log_file,
-        when="midnight",
-        interval=1,
-        backupCount=30,  # Mantener 30 dias de logs
-        encoding="utf-8",
-    )
-    file_handler.suffix = "%Y-%m-%d"
-    file_handler.setFormatter(formatter)
-    raiz.addHandler(file_handler)
+        # Log general
+        log_file = os.path.join(LOG_DIR, "app.log")
+        file_handler = TimedRotatingFileHandler(
+            filename=log_file,
+            when="midnight",
+            interval=1,
+            backupCount=30,  # Mantener 30 dias de logs
+            encoding="utf-8",
+        )
+        file_handler.suffix = "%Y-%m-%d"
+        file_handler.setFormatter(formatter)
+        raiz.addHandler(file_handler)
 
-    # --- Handler: archivo dedicado para interacciones ---
-    interaction_file = os.path.join(LOG_DIR, "interactions.log")
-    interaction_handler = TimedRotatingFileHandler(
-        filename=interaction_file,
-        when="midnight",
-        interval=1,
-        backupCount=90,  # Mantener 90 dias de interacciones
-        encoding="utf-8",
-    )
-    interaction_handler.suffix = "%Y-%m-%d"
-    interaction_handler.setFormatter(formatter)
+        # Log dedicado para interacciones
+        interaction_file = os.path.join(LOG_DIR, "interactions.log")
+        interaction_handler = TimedRotatingFileHandler(
+            filename=interaction_file,
+            when="midnight",
+            interval=1,
+            backupCount=90,  # Mantener 90 dias de interacciones
+            encoding="utf-8",
+        )
+        interaction_handler.suffix = "%Y-%m-%d"
+        interaction_handler.setFormatter(formatter)
 
-    interaction_logger = logging.getLogger("interaction")
-    interaction_logger.addHandler(interaction_handler)
+        interaction_logger = logging.getLogger("interaction")
+        interaction_logger.addHandler(interaction_handler)
+    except (PermissionError, OSError) as e:
+        raiz.warning("No se pudo crear logs en disco (%s). Usando solo stdout.", e)
 
     # Reducir ruido de librerias externas
     logging.getLogger("httpx").setLevel(logging.WARNING)

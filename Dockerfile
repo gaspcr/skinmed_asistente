@@ -17,8 +17,11 @@ COPY --from=builder /install /usr/local
 # Copiar codigo fuente
 COPY . .
 
+# Crear directorio de logs
+RUN mkdir -p /app/logs
+
 # No ejecutar como root
-RUN adduser --disabled-password --gecos "" appuser
+RUN adduser --disabled-password --gecos "" appuser && chown -R appuser:appuser /app/logs
 USER appuser
 
 EXPOSE 8000
