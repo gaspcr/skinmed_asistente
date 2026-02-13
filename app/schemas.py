@@ -8,7 +8,7 @@ class Profile(BaseModel):
     name: str
 
 class Contact(BaseModel):
-    profile: Profile
+    profile: Optional[Profile] = None
     wa_id: str
 
 class Button(BaseModel):
