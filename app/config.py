@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = Field(default="INFO", description="Nivel de logging (DEBUG, INFO, WARNING, ERROR)")
 
     # --- Entorno ---
-    ENVIRONMENT: str = Field(default="production", description="Entorno de ejecucion (development, staging, production)")
+    ENVIRONMENT: str = Field(default="development", description="Entorno de ejecucion (development, staging, production)")
 
     # --- Rate Limiting ---
     RATE_LIMIT_MAX: int = Field(default=30, description="Maximo de mensajes por ventana de rate limit")
