@@ -3,6 +3,7 @@ from typing import Optional
 from app.auth.models import User
 from app.services.filemaker import FileMakerService
 from app.services import redis as redis_svc
+from app.interaction_logger import log_auth
 
 
 class AuthService:
@@ -14,12 +15,17 @@ class AuthService:
         """
         cached = await redis_svc.get_json(f"auth:user:{phone}")
         if cached:
-            return User(**cached)
+            user = User(**cached)
+            log_auth(phone, user_name=user.name, role=user.role, status="cached")
+            return user
 
         user = await FileMakerService.get_user_by_phone(phone)
 
         if user:
             await redis_svc.set_json(f"auth:user:{phone}", user.model_dump(), ttl=300)
+            log_auth(phone, user_name=user.name, role=user.role, status="success")
+        else:
+            log_auth(phone, status="not_found")
 
         return user
 

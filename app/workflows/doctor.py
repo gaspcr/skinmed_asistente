@@ -11,6 +11,7 @@ from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.formatters.agenda import AgendaFormatter
 from app.exceptions import ServicioNoDisponibleError
+from app.interaction_logger import log_workflow_action
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ class DoctorWorkflow(WorkflowHandler):
                 return
 
         # Default: enviar plantilla inicial
+        log_workflow_action(phone, user.name, "medico", "send_initial_template")
         await WhatsAppService.send_template(phone, user.name, "respuesta_inicial_doctores_uso_interno")
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
@@ -33,6 +35,7 @@ class DoctorWorkflow(WorkflowHandler):
 
         # Botones de plantilla inicial (respuesta_inicial_doctores_uso_interno)
         if button_title == "Revisar agenda del día":
+            log_workflow_action(phone, user.name, "medico", "consultar_agenda", "hoy")
             background_tasks.add_task(self._send_agenda, user, phone, None)
 
         elif button_title == "Revisar agenda otro día":
@@ -43,7 +46,7 @@ class DoctorWorkflow(WorkflowHandler):
             )
 
         elif button_title in ["Enviar recado", "Enviar recados", "Revisar mis recados"]:
-            logger.debug("Enviando plantilla recados por boton: '%s'", button_title)
+            log_workflow_action(phone, user.name, "medico", "recados", button_title)
             await WhatsAppService.send_template(phone, user.name, "recados_de_doctores", include_header=False, include_body=True)
 
         # Botones de plantilla recados (recados_de_doctores)
@@ -74,6 +77,7 @@ class DoctorWorkflow(WorkflowHandler):
             filemaker_date = date_obj.strftime("%m-%d-%Y")
 
             await workflow_state.clear_state(phone)
+            log_workflow_action(phone, user.name, "medico", "consultar_agenda", filemaker_date)
             await self._send_agenda(user, phone, filemaker_date)
 
         except ValueError:

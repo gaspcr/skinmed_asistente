@@ -11,6 +11,7 @@ from app.services import http as http_svc
 from app.exceptions import ServicioNoDisponibleError
 from app.utils.retry import con_reintentos
 from app.utils.circuit_breaker import CircuitBreaker, CircuitBreakerAbierto
+from app.interaction_logger import ApiTimer
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +46,10 @@ class FileMakerService:
             settings = get_settings()
             client = http_svc.get_client()
             url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/sessions"
-            resp = await client.post(url, auth=(settings.FM_USER, settings.FM_PASS), json={})
-            resp.raise_for_status()
-            return resp.json()['response']['token']
+            with ApiTimer("filemaker", "get_token"):
+                resp = await client.post(url, auth=(settings.FM_USER, settings.FM_PASS), json={})
+                resp.raise_for_status()
+                return resp.json()['response']['token']
 
         token = await con_reintentos(
             _solicitar_token,
@@ -75,7 +77,8 @@ class FileMakerService:
         }
 
         async with _fm_circuit_breaker:
-            resp = await client.post(url, json=query, headers=headers)
+            with ApiTimer("filemaker", f"find:{layout}"):
+                resp = await client.post(url, json=query, headers=headers)
 
         if resp.status_code == 401 and intentar_reauth:
             logger.info("Token FM expirado, refrescando...")
