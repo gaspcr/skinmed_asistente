@@ -5,7 +5,6 @@ import httpx
 from app.config import get_settings
 from app.services import http as http_svc
 from app.utils.retry import con_reintentos
-from app.interaction_logger import log_message_sent
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,6 @@ class WhatsAppService:
                 excepciones_reintentables={httpx.RequestError, httpx.HTTPStatusError},
                 nombre_operacion="WhatsApp send_message",
             )
-            log_message_sent(to_phone, msg_type="text", content=text)
         except Exception as e:
             logger.error("Error al enviar mensaje a %s: %s", to_phone, e)
 
@@ -105,6 +103,5 @@ class WhatsAppService:
                 excepciones_reintentables={httpx.RequestError, httpx.HTTPStatusError},
                 nombre_operacion="WhatsApp send_template",
             )
-            log_message_sent(to_phone, msg_type="template", template_name=template_name)
         except Exception as e:
             logger.error("Error al enviar template '%s' a %s: %s", template_name, to_phone, e)

@@ -13,10 +13,6 @@ from app.services import redis as redis_svc
 from app.services import http as http_svc
 from app.middleware import verify_signature, SecurityHeadersMiddleware
 from app.exceptions import ServicioNoDisponibleError
-from app.interaction_logger import (
-    log_message_received, log_message_duplicate, log_button_click,
-    log_auth, log_rate_limit, log_unsupported_message,
-)
 from app.workflows import doctor, manager, nurse
 from app.workflows.role_registry import get_workflow_handler
 
@@ -152,13 +148,12 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
             ventana_ttl=settings.RATE_LIMIT_WINDOW,
         )
         if not permitido:
-            log_rate_limit(sender_phone)
+            logger.warning("Rate limit excedido para %s", sender_phone)
             return
 
         # Autenticacion
         user = await AuthService.get_user_by_phone(sender_phone)
         if not user:
-            log_auth(sender_phone, status="not_found")
             return
 
         # Verificar handler del rol
@@ -172,7 +167,6 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
 
         # Manejo de tipos de mensaje no soportados
         if msg.type not in TIPOS_MENSAJE_SOPORTADOS:
-            log_unsupported_message(sender_phone, msg.type)
             await WhatsAppService.send_message(
                 sender_phone,
                 "Lo siento, este tipo de mensaje no es soportado. "
@@ -187,14 +181,16 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
             # Sanitizar: limitar longitud
             if len(message_text) > settings.MAX_MESSAGE_LENGTH:
                 message_text = message_text[:settings.MAX_MESSAGE_LENGTH]
+                logger.info(
+                    "Mensaje truncado para %s (largo original > %d)",
+                    sender_phone,
+                    settings.MAX_MESSAGE_LENGTH,
+                )
 
-            log_message_received(sender_phone, "text", message_text, msg.id)
             await handler.handle_text(user, sender_phone, message_text)
 
         elif msg.type in ["interactive", "button"]:
             btn_title = extract_button_title(msg)
-            log_message_received(sender_phone, msg.type, btn_title, msg.id)
-            log_button_click(sender_phone, user.name, user.role, btn_title)
             await handler.handle_button(user, sender_phone, btn_title, background_tasks)
 
     except ServicioNoDisponibleError as e:
@@ -226,7 +222,7 @@ async def webhook(
             msg_id = msg.id
             ya_procesado = await redis_svc.get(f"msg:processed:{msg_id}")
             if ya_procesado:
-                log_message_duplicate(msg.sender_phone, msg_id)
+                logger.debug("Mensaje %s ya procesado, ignorando", msg_id)
                 return {"status": "already_processed"}
 
             # Marcar como procesado (TTL 1 hora)
