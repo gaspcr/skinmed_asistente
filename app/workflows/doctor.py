@@ -10,6 +10,7 @@ from app.workflows import state as workflow_state
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.formatters.agenda import AgendaFormatter
+from app.formatters.recados import RecadosFormatter
 from app.exceptions import ServicioNoDisponibleError
 
 logger = logging.getLogger(__name__)
@@ -42,9 +43,12 @@ class DoctorWorkflow(WorkflowHandler):
                 "Para revisar tu agenda en otro día, indícanos la fecha en formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
             )
 
-        elif button_title in ["Enviar recado"]:
+        elif button_title == "Enviar recado":
             logger.debug("Enviando plantilla recados por boton: '%s'", button_title)
             await WhatsAppService.send_template(phone, user.name, "recados_de_doctores", include_header=False, include_body=True)
+
+        elif button_title == "Revisar mis recados":
+            background_tasks.add_task(self._send_recados, user, phone)
 
         # Botones de plantilla recados (recados_de_doctores)
         elif button_title in ["Agendar paciente", "Bloquear agenda (día)"]:
@@ -86,11 +90,25 @@ class DoctorWorkflow(WorkflowHandler):
     async def _send_agenda(self, user, phone: str, date: str = None):
         """Envia agenda del dia o de una fecha especifica"""
         try:
-            agenda_data = await FileMakerService.get_agenda_raw(user.name, date)
+            agenda_data = await FileMakerService.get_agenda_raw(user.id, date)
             formatted_msg = AgendaFormatter.format(agenda_data, user.name)
             await WhatsAppService.send_message(phone, formatted_msg)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar agenda: %s", e)
+            await WhatsAppService.send_message(
+                phone,
+                "Lo sentimos, el sistema no está disponible en este momento. "
+                "Por favor intenta de nuevo en unos minutos."
+            )
+
+    async def _send_recados(self, user, phone: str):
+        """Obtiene y envia los recados del doctor"""
+        try:
+            recados_data = await FileMakerService.get_recados(user.id)
+            formatted_msg = RecadosFormatter.format(recados_data, user.name)
+            await WhatsAppService.send_message(phone, formatted_msg)
+        except ServicioNoDisponibleError as e:
+            logger.error("Servicio no disponible al consultar recados: %s", e)
             await WhatsAppService.send_message(
                 phone,
                 "Lo sentimos, el sistema no está disponible en este momento. "

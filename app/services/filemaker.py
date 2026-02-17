@@ -133,6 +133,41 @@ class FileMakerService:
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
 
     @staticmethod
+    async def get_recados(doctor_id: str) -> list:
+        """Obtiene recados de un doctor por su ID de FileMaker."""
+        settings = get_settings()
+
+        query = {
+            "query": [
+                {
+                    "T500_RECADOS::_FK_IDRRHH": doctor_id,
+                    "Estado": "Vigente"
+                }
+            ]
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(settings.FM_RECADOS_LAYOUT, query)
+            return await FileMakerService._parsear_respuesta_find(resp, "get_recados")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker get_recados",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al obtener recados: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
     async def get_user_by_phone(phone: str):
         """Busca usuario por telefono en FileMaker."""
         settings = get_settings()
@@ -151,9 +186,10 @@ class FileMakerService:
                 data = resp.json()['response']['data']
                 if data:
                     user_data = data[0]['fieldData']
-                    id = user_data.get('XUsuarioRRHH_Pk')
+                    user_id = user_data.get('XUsuarioRRHH_Pk')
+                    nombre = user_data.get('Nombre')
                     rol_str = user_data.get('ROL', '').lower().strip()
-                    return User(phone=phone, id=id, role=rol_str)
+                    return User(phone=phone, id=user_id, name=nombre, role=rol_str)
                 return None
 
             if resp.status_code == 500 and _es_sin_registros(resp):
