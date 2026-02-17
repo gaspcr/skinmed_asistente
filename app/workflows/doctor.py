@@ -42,7 +42,7 @@ class DoctorWorkflow(WorkflowHandler):
                 "Para revisar tu agenda en otro día, indícanos la fecha en formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
             )
 
-        elif button_title in ["Enviar recado", "Enviar recados", "Revisar mis recados"]:
+        elif button_title in ["Enviar recado"]:
             logger.debug("Enviando plantilla recados por boton: '%s'", button_title)
             await WhatsAppService.send_template(phone, user.name, "recados_de_doctores", include_header=False, include_body=True)
 

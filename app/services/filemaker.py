@@ -96,7 +96,7 @@ class FileMakerService:
         raise ServicioNoDisponibleError("FileMaker", f"{contexto}: HTTP {resp.status_code}")
 
     @staticmethod
-    async def get_agenda_raw(name: str, date: str = None) -> list:
+    async def get_agenda_raw(id: str, date: str = None) -> list:
         """Obtiene datos crudos de agenda desde FileMaker."""
         settings = get_settings()
         tz = pytz.timezone("America/Santiago")
@@ -106,7 +106,7 @@ class FileMakerService:
             "query": [
                 {
                     "Fecha": today_str,
-                    "Recurso Humano::Nombre": name,
+                    "Recurso Humano::Recurso Humano_pk": id,
                 }
             ]
         }
@@ -151,9 +151,9 @@ class FileMakerService:
                 data = resp.json()['response']['data']
                 if data:
                     user_data = data[0]['fieldData']
-                    nombre = user_data.get('Nombre')
+                    id = user_data.get('XUsuarioRRHH_Pk')
                     rol_str = user_data.get('ROL', '').lower().strip()
-                    return User(phone=phone, name=nombre, role=rol_str)
+                    return User(phone=phone, id=id, role=rol_str)
                 return None
 
             if resp.status_code == 500 and _es_sin_registros(resp):
