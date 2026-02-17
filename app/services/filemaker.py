@@ -140,7 +140,7 @@ class FileMakerService:
         query = {
             "query": [
                 {
-                    "T500_RECADOS::_FK_IDRRHH": doctor_id,
+                    "T500_RECADOS::_FK_IDRRHH": f"=={doctor_id}",
                     "Estado": "Vigente"
                 }
             ]
