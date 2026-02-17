@@ -186,7 +186,7 @@ class FileMakerService:
                 data = resp.json()['response']['data']
                 if data:
                     user_data = data[0]['fieldData']
-                    user_id = user_data.get('XUsuarioRRHH_Pk')
+                    user_id = str(user_data.get('XUsuarioRRHH_Pk', ''))
                     nombre = user_data.get('Nombre')
                     rol_str = user_data.get('ROL', '').lower().strip()
                     return User(phone=phone, id=user_id, name=nombre, role=rol_str)
