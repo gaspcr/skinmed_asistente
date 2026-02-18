@@ -2,6 +2,7 @@ import logging
 import re
 from datetime import datetime
 
+import pytz
 from fastapi import BackgroundTasks
 
 from app.workflows.base import WorkflowHandler
@@ -24,6 +25,9 @@ class DoctorWorkflow(WorkflowHandler):
         if step:
             if step == "waiting_for_date":
                 await self._handle_date_input(user, phone, message_text)
+                return
+            elif step == "waiting_for_recado":
+                await self._handle_recado_input(user, phone, message_text)
                 return
 
         # Default: enviar plantilla inicial
@@ -51,7 +55,17 @@ class DoctorWorkflow(WorkflowHandler):
             background_tasks.add_task(self._send_recados, user, phone)
 
         # Botones de plantilla recados (recados_de_doctores)
-        elif button_title in ["Agendar paciente", "Bloquear agenda (día)"]:
+        elif button_title == "Otro (varios)":
+            await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Otros"})
+            await WhatsAppService.send_message(
+                phone,
+                "📝 *Categoría: Otros*\n\n"
+                "Por favor escribe tu recado incluyendo el *nombre del paciente*.\n"
+                "Lo ingresaremos a FileMaker y dejaremos aviso a gerencia.\n\n"
+                "_Escribe tu mensaje a continuación:_"
+            )
+
+        elif button_title in ["Agendar paciente", "Bloquear agenda (día)", "Enviar recetas"]:
             await WhatsAppService.send_message(phone, "Sistema de recados en construcción 🚧")
 
         else:
@@ -86,6 +100,48 @@ class DoctorWorkflow(WorkflowHandler):
                 "❌ Fecha inválida. Verifica que el día y mes sean correctos.\n\nEjemplo: 05-02-26"
             )
             await workflow_state.clear_state(phone)
+
+    async def _handle_recado_input(self, user, phone: str, message_text: str):
+        """Procesa el texto del recado y lo crea en FileMaker"""
+        # Obtener datos del estado (categoria)
+        state_data = await workflow_state.get_data(phone)
+        categoria = state_data.get("categoria", "Otros") if state_data else "Otros"
+
+        # Limpiar estado antes de procesar
+        await workflow_state.clear_state(phone)
+
+        # Obtener fecha y hora actual en zona horaria de Chile
+        tz = pytz.timezone("America/Santiago")
+        now = datetime.now(tz)
+        fecha = now.strftime("%m-%d-%Y")
+        hora = now.strftime("%H:%M:%S")
+
+        # Formatear texto del recado: "autor > fecha > hora\r  mensaje"
+        fecha_display = now.strftime("%d-%m-%Y")
+        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r  {message_text}"
+
+        try:
+            await FileMakerService.create_recado(
+                doctor_id=user.id,
+                texto=texto_formateado,
+                categoria=categoria,
+                fecha=fecha,
+                hora=hora,
+            )
+            await WhatsAppService.send_message(
+                phone,
+                "✅ *Recado registrado exitosamente*\n\n"
+                f"📋 Categoría: {categoria}\n"
+                f"📅 {fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
+                "Se ha dejado aviso a gerencia."
+            )
+        except ServicioNoDisponibleError as e:
+            logger.error("Error al crear recado: %s", e)
+            await WhatsAppService.send_message(
+                phone,
+                "❌ No se pudo registrar el recado. "
+                "Por favor intenta de nuevo en unos minutos."
+            )
 
     async def _send_agenda(self, user, phone: str, date: str = None):
         """Envia agenda del dia o de una fecha especifica"""

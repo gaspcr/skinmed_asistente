@@ -84,6 +84,84 @@ class FileMakerService:
 
         return resp
 
+    @classmethod
+    async def _fm_create_record(cls, layout: str, field_data: dict, intentar_reauth: bool = True) -> httpx.Response:
+        """
+        Crea un registro en FileMaker con reintento automatico de token.
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        settings = get_settings()
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/layouts/{layout}/records"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        payload = {"fieldData": field_data}
+
+        async with _fm_circuit_breaker:
+            resp = await client.post(url, json=payload, headers=headers)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_create_record(layout, field_data, intentar_reauth=False)
+
+        return resp
+
+    @staticmethod
+    async def create_recado(doctor_id: str, texto: str, categoria: str, fecha: str, hora: str) -> bool:
+        """
+        Crea un recado en FileMaker.
+
+        Args:
+            doctor_id: ID del doctor (_FK_IDRRHH)
+            texto: Texto del recado formateado
+            categoria: Categoria del recado (ej: "Otros")
+            fecha: Fecha en formato MM-DD-YYYY
+            hora: Hora en formato HH:MM:SS
+
+        Returns:
+            True si se creo exitosamente
+        """
+        settings = get_settings()
+        field_data = {
+            "_FK_IDRRHH": doctor_id,
+            "texto_Recado": texto,
+            "Categoria": categoria,
+            "FechaRecado": fecha,
+            "HoraRecado": hora,
+            "Estado": "Vigente",
+        }
+
+        async def _crear():
+            resp = await FileMakerService._fm_create_record(
+                settings.FM_RECADOS_CREATE_LAYOUT, field_data
+            )
+            if resp.status_code in (200, 201):
+                return True
+            raise ServicioNoDisponibleError(
+                "FileMaker", f"create_recado: HTTP {resp.status_code}"
+            )
+
+        try:
+            return await con_reintentos(
+                _crear,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker create_recado",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al crear recado: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
     @staticmethod
     async def _parsear_respuesta_find(resp: httpx.Response, contexto: str) -> list:
         """Parsea respuesta de _fm_find, diferenciando datos vacios de errores."""
