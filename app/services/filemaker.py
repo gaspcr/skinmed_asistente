@@ -213,3 +213,46 @@ class FileMakerService:
         except Exception as e:
             logger.error("Error inesperado al buscar usuario: %s", e)
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
+    async def get_pacient_by_id(pacient_id: str) -> str | None:
+        """Busca paciente por ID en FileMaker. Retorna el nombre completo o None."""
+        settings = get_settings()
+        query = {
+            "query": [
+                {
+                    "_PK_ID Paciente": pacient_id,
+                }
+            ]
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(settings.FM_PACIENTES_LAYOUT, query)
+
+            if resp.status_code == 200:
+                data = resp.json()['response']['data']
+                if data:
+                    return data[0]['fieldData'].get('NombreCompleto', '')
+                return None
+
+            if resp.status_code == 500 and _es_sin_registros(resp):
+                return None
+
+            raise ServicioNoDisponibleError("FileMaker", f"get_pacient_by_id: HTTP {resp.status_code}")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker get_pacient_by_id",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al buscar paciente: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")

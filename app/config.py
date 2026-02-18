@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     FM_AGENDA_LAYOUT: str = Field(default="ListadoDeHoras_dapi", description="Layout de agenda en FileMaker")
     FM_AUTH_LAYOUT: str = Field(default="AuthUsuarios_dapi", description="Layout de autenticacion en FileMaker")
     FM_RECADOS_LAYOUT: str = Field(default="ListadoDeRecados_dapi", description="Layout de recados en FileMaker")
+    FM_PACIENTES_LAYOUT: str = Field(default="ListadoDePacientes_dapi", description="Layout de pacientes en FileMaker")
 
     # --- WhatsApp ---
     WSP_TOKEN: str = Field(description="Token de WhatsApp Business API")

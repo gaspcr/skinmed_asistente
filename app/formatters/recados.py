@@ -1,20 +1,25 @@
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 
 class RecadosFormatter:
     """Formatea recados de FileMaker para WhatsApp."""
 
     @staticmethod
-    def format(data: List[Dict], doctor_name: str) -> str:
+    def format(data: List[Dict], doctor_name: str, pacient_names: Optional[Dict[str, str]] = None) -> str:
         if not data:
             return f"*{doctor_name}*, no tienes recados pendientes. ✅"
 
+        pacient_names = pacient_names or {}
+
         recados = []
         for record in data:
-            texto_raw = record.get("fieldData", {}).get("texto_Recado", "")
+            field_data = record.get("fieldData", {})
+            texto_raw = field_data.get("texto_Recado", "")
+            pac_id = field_data.get("_FK_IDPaciente", "")
+            pac_name = pacient_names.get(pac_id, "Paciente desconocido")
             parsed = RecadosFormatter._parse_texto_recado(texto_raw)
             if parsed:
-                recados.append(parsed)
+                recados.append({"entradas": parsed, "paciente": pac_name})
 
         if not recados:
             return f"*{doctor_name}*, no tienes recados pendientes. ✅"
@@ -24,13 +29,14 @@ class RecadosFormatter:
         msg += "━━━━━━━━━━━━━━━\n"
 
         for i, recado in enumerate(recados, 1):
-            msg += f"\n*Recado #{i}*\n"
+            msg += f"\n*Recado #{i}* — 🧑‍⚕️ {recado['paciente']}\n"
             # Mostrar solo las ultimas 3 entradas del hilo
-            entradas = recado[-3:] if len(recado) > 3 else recado
-            if len(recado) > 3:
-                msg += f"_... {len(recado) - 3} mensaje(s) anterior(es)_\n"
+            entradas = recado["entradas"]
+            visibles = entradas[-3:] if len(entradas) > 3 else entradas
+            if len(entradas) > 3:
+                msg += f"_... {len(entradas) - 3} mensaje(s) anterior(es)_\n"
 
-            for entrada in entradas:
+            for entrada in visibles:
                 autor = entrada["autor"]
                 fecha = entrada["fecha"]
                 hora = entrada["hora"]

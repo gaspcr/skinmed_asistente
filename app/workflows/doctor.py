@@ -105,7 +105,19 @@ class DoctorWorkflow(WorkflowHandler):
         """Obtiene y envia los recados del doctor"""
         try:
             recados_data = await FileMakerService.get_recados(user.id)
-            formatted_msg = RecadosFormatter.format(recados_data, user.name)
+
+            # Resolver IDs de pacientes a nombres
+            pacient_names = {}
+            for record in recados_data:
+                pac_id = record.get("fieldData", {}).get("_FK_IDPaciente", "")
+                if pac_id and pac_id not in pacient_names:
+                    try:
+                        name = await FileMakerService.get_pacient_by_id(pac_id)
+                        pacient_names[pac_id] = name or "Paciente desconocido"
+                    except Exception:
+                        pacient_names[pac_id] = "Paciente desconocido"
+
+            formatted_msg = RecadosFormatter.format(recados_data, user.name, pacient_names)
             await WhatsAppService.send_message(phone, formatted_msg)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar recados: %s", e)
