@@ -5,6 +5,8 @@ from datetime import datetime
 import pytz
 from fastapi import BackgroundTasks
 
+from app.config import get_settings
+
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
@@ -55,6 +57,13 @@ class DoctorWorkflow(WorkflowHandler):
             background_tasks.add_task(self._send_recados, user, phone)
 
         # Botones de plantilla recados (recados_de_doctores)
+        elif button_title == "Agendar paciente":
+            await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Agendar paciente"})
+            await WhatsAppService.send_template(
+                phone, user.name, "agendar_paciente_doctores",
+                include_header=False, include_body=False,
+            )
+
         elif button_title == "Otro (varios)":
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Otros"})
             await WhatsAppService.send_message(
@@ -65,8 +74,19 @@ class DoctorWorkflow(WorkflowHandler):
                 "_Escribe tu mensaje a continuación:_"
             )
 
-        elif button_title in ["Agendar paciente", "Bloquear agenda (día)", "Enviar recetas"]:
-            await WhatsAppService.send_message(phone, "Sistema de recados en construcción 🚧")
+        elif button_title == "Bloquear agenda (día)":
+            await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Bloquear agenda"})
+            await WhatsAppService.send_template(
+                phone, user.name, "bloquear_agenda_dia_doctores",
+                include_header=False, include_body=False,
+            )
+
+        elif button_title == "Enviar recetas":
+            await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Enviar receta"})
+            await WhatsAppService.send_template(
+                phone, user.name, "enviar_receta_doctores",
+                include_header=False, include_body=False,
+            )
 
         else:
             logger.warning("Boton no reconocido: '%s'", button_title)
@@ -135,6 +155,19 @@ class DoctorWorkflow(WorkflowHandler):
                 f"📅 {fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
                 "Se ha dejado aviso a gerencia."
             )
+
+            # Notificar a la jefa de enfermeria via template
+            settings = get_settings()
+            await WhatsAppService.send_template(
+                settings.CHIEF_NURSE_PHONE,
+                user.name,
+                "reenviar_recado_secretaria",
+                include_header=False,
+                include_body=False,
+                header_params=[categoria],
+                body_params=[user.name, message_text],
+            )
+
         except ServicioNoDisponibleError as e:
             logger.error("Error al crear recado: %s", e)
             await WhatsAppService.send_message(

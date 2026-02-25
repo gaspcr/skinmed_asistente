@@ -40,7 +40,15 @@ class WhatsAppService:
             logger.error("Error al enviar mensaje a %s: %s", to_phone, e)
 
     @staticmethod
-    async def send_template(to_phone: str, nombre: str, template_name: str, include_header: bool = True, include_body: bool = False):
+    async def send_template(
+        to_phone: str,
+        nombre: str,
+        template_name: str,
+        include_header: bool = True,
+        include_body: bool = False,
+        header_params: list[str] | None = None,
+        body_params: list[str] | None = None,
+    ):
         settings = get_settings()
         url = f"https://graph.facebook.com/{settings.META_API_VERSION}/{settings.WSP_PHONE_ID}/messages"
         headers = {"Authorization": f"Bearer {settings.WSP_TOKEN}"}
@@ -52,26 +60,20 @@ class WhatsAppService:
 
         components = []
 
-        if include_header:
+        # Header: use explicit header_params if provided, else fall back to nombre
+        h_params = header_params if header_params is not None else ([nombre] if include_header else [])
+        if h_params:
             components.append({
                 "type": "header",
-                "parameters": [
-                    {
-                        "type": "text",
-                        "text": nombre
-                    }
-                ]
+                "parameters": [{"type": "text", "text": p} for p in h_params]
             })
 
-        if include_body:
+        # Body: use explicit body_params if provided, else fall back to nombre
+        b_params = body_params if body_params is not None else ([nombre] if include_body else [])
+        if b_params:
             components.append({
                 "type": "body",
-                "parameters": [
-                    {
-                        "type": "text",
-                        "text": nombre
-                    }
-                ]
+                "parameters": [{"type": "text", "text": p} for p in b_params]
             })
 
         if components:
