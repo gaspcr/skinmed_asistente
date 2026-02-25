@@ -1,4 +1,5 @@
 import logging
+import re
 
 import httpx
 
@@ -7,6 +8,14 @@ from app.services import http as http_svc
 from app.utils.retry import con_reintentos
 
 logger = logging.getLogger(__name__)
+
+
+def _sanitize_template_param(text: str) -> str:
+    """Sanitiza texto para parametros de template de WhatsApp.
+    La API rechaza newlines, tabs, y 4+ espacios consecutivos."""
+    text = text.replace("\n", " | ").replace("\r", " | ").replace("\t", " ")
+    text = re.sub(r" {4,}", "   ", text)  # Colapsar 4+ espacios a 3
+    return text.strip()
 
 
 class WhatsAppService:
@@ -65,7 +74,7 @@ class WhatsAppService:
         if h_params:
             components.append({
                 "type": "header",
-                "parameters": [{"type": "text", "text": p} for p in h_params]
+                "parameters": [{"type": "text", "text": _sanitize_template_param(p)} for p in h_params]
             })
 
         # Body: use explicit body_params if provided, else fall back to nombre
@@ -73,7 +82,7 @@ class WhatsAppService:
         if b_params:
             components.append({
                 "type": "body",
-                "parameters": [{"type": "text", "text": p} for p in b_params]
+                "parameters": [{"type": "text", "text": _sanitize_template_param(p)} for p in b_params]
             })
 
         if components:
