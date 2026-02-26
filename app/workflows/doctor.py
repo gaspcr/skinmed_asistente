@@ -22,6 +22,22 @@ logger = logging.getLogger(__name__)
 class DoctorWorkflow(WorkflowHandler):
 
     async def handle_text(self, user, phone: str, message_text: str = ""):
+        texto = message_text.strip().lower()
+
+        # Comandos globales: menu y salir (siempre disponibles)
+        if texto == "menu":
+            await workflow_state.clear_state(phone)
+            await self._send_menu(user, phone)
+            return
+
+        if texto == "salir":
+            await workflow_state.clear_state(phone)
+            await WhatsAppService.send_message(
+                phone,
+                "👋 Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu* para volver al inicio."
+            )
+            return
+
         # Verificar si el usuario esta en un flujo multi-paso
         step = await workflow_state.get_step(phone)
         if step:
@@ -31,9 +47,28 @@ class DoctorWorkflow(WorkflowHandler):
             elif step == "waiting_for_recado":
                 await self._handle_recado_input(user, phone, message_text)
                 return
+            elif step == "waiting_for_continue":
+                if texto in ["si", "sí", "s"]:
+                    await workflow_state.clear_state(phone)
+                    await self._send_menu(user, phone)
+                elif texto in ["no", "n"]:
+                    await workflow_state.clear_state(phone)
+                    await WhatsAppService.send_message(
+                        phone,
+                        "👋 ¡Hasta luego! Cuando necesites algo, escribe cualquier mensaje o *menu*."
+                    )
+                return
 
-        # Default: enviar plantilla inicial
+        # Default: enviar plantilla inicial + mensaje de ayuda
+        await self._send_menu(user, phone)
+
+    async def _send_menu(self, user, phone: str):
+        """Envia la plantilla inicial y el mensaje de ayuda"""
         await WhatsAppService.send_template(phone, user.name, "respuesta_inicial_doctores_uso_interno")
+        await WhatsAppService.send_message(
+            phone,
+            "💡 _Puedes escribir *menu* en cualquier momento para volver al inicio o *salir* para terminar el flujo._"
+        )
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
         logger.debug("Boton recibido: '%s'", button_title)
@@ -135,38 +170,57 @@ class DoctorWorkflow(WorkflowHandler):
         now = datetime.now(tz)
         fecha = now.strftime("%m-%d-%Y")
         hora = now.strftime("%H:%M:%S")
+        fecha_display = now.strftime("%d-%m-%Y")
 
         # Formatear texto del recado: "autor > fecha > hora\r  mensaje"
-        fecha_display = now.strftime("%d-%m-%Y")
         texto_formateado = f"{user.name} > {fecha_display} > {hora}\r  {message_text}"
 
+        # Reglas por categoria:
+        # - Enviar receta:    solo FileMaker
+        # - Bloquear agenda:  solo notificar enfermeria
+        # - Agendar paciente: FileMaker + notificar enfermeria
+        # - Otros:            FileMaker + notificar enfermeria
+        guardar_en_fm = categoria != "Bloquear agenda"
+        notificar_enfermeria = categoria != "Enviar receta"
+
         try:
-            await FileMakerService.create_recado(
-                doctor_id=user.id,
-                texto=texto_formateado,
-                categoria=categoria,
-                fecha=fecha,
-                hora=hora,
-            )
+            if guardar_en_fm:
+                await FileMakerService.create_recado(
+                    doctor_id=user.id,
+                    texto=texto_formateado,
+                    categoria=categoria,
+                    fecha=fecha,
+                    hora=hora,
+                )
+
+            if notificar_enfermeria:
+                settings = get_settings()
+                await WhatsAppService.send_template(
+                    settings.CHIEF_NURSE_PHONE,
+                    user.name,
+                    "reenviar_recado_secretaria",
+                    include_header=False,
+                    include_body=False,
+                    header_params=[categoria],
+                    body_params=[user.name, message_text],
+                )
+
+            # Confirmacion al doctor
+            if guardar_en_fm and notificar_enfermeria:
+                confirmacion = "Se ha registrado en FileMaker y notificado a enfermería."
+            elif guardar_en_fm:
+                confirmacion = "Se ha registrado en FileMaker."
+            else:
+                confirmacion = "Se ha notificado a enfermería."
+
             await WhatsAppService.send_message(
                 phone,
-                "✅ *Recado registrado exitosamente*\n\n"
+                "✅ *Recado procesado exitosamente*\n\n"
                 f"📋 Categoría: {categoria}\n"
                 f"📅 {fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
-                "Se ha dejado aviso a gerencia."
+                f"{confirmacion}"
             )
-
-            # Notificar a la jefa de enfermeria via template
-            settings = get_settings()
-            await WhatsAppService.send_template(
-                settings.CHIEF_NURSE_PHONE,
-                user.name,
-                "reenviar_recado_secretaria",
-                include_header=False,
-                include_body=False,
-                header_params=[categoria],
-                body_params=[user.name, message_text],
-            )
+            await self._ask_continue(phone)
 
         except ServicioNoDisponibleError as e:
             logger.error("Error al crear recado: %s", e)
@@ -176,12 +230,21 @@ class DoctorWorkflow(WorkflowHandler):
                 "Por favor intenta de nuevo en unos minutos."
             )
 
+    async def _ask_continue(self, phone: str):
+        """Pregunta al doctor si desea hacer algo mas"""
+        await workflow_state.set_state(phone, "waiting_for_continue")
+        await WhatsAppService.send_message(
+            phone,
+            "¿Deseas hacer algo más? Responde *si* o *no*."
+        )
+
     async def _send_agenda(self, user, phone: str, date: str = None):
         """Envia agenda del dia o de una fecha especifica"""
         try:
             agenda_data = await FileMakerService.get_agenda_raw(user.id, date)
             formatted_msg = AgendaFormatter.format(agenda_data, user.name)
             await WhatsAppService.send_message(phone, formatted_msg)
+            await self._ask_continue(phone)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar agenda: %s", e)
             await WhatsAppService.send_message(
@@ -208,6 +271,7 @@ class DoctorWorkflow(WorkflowHandler):
 
             formatted_msg = RecadosFormatter.format(recados_data, user.name, pacient_names)
             await WhatsAppService.send_message(phone, formatted_msg)
+            await self._ask_continue(phone)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar recados: %s", e)
             await WhatsAppService.send_message(

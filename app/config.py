@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     MAX_MESSAGE_LENGTH: int = Field(default=500, description="Longitud maxima de mensaje de texto aceptado")
 
     # --- Notificaciones ---
-    CHIEF_NURSE_PHONE: str = Field(default="56948776414", description="Telefono de la jefa de enfermeria para notificaciones de recados")
+    CHIEF_NURSE_PHONE: str = Field(default="56944250961", description="Telefono de la jefa de enfermeria para notificaciones de recados")
 
     @property
     def is_production(self) -> bool:
