@@ -28,17 +28,17 @@ class AgendaFormatter:
             tipo = f.get('Tipo', 'Desconocido')
             
             if tipo == "Disponible":
-                msg += f"⏰ *{hora}* — 🟢 Disponible\n"
+                msg += f"*{hora}* — Disponible\n"
                 continue
 
             nombre = f.get('Pacientes::NOMBRE', '')
             apellido = f.get('Pacientes::APELLIDO PATERNO', '')
-            paciente = f"{nombre} {apellido}".strip() or 'Sin paciente'
+            paciente = f"{nombre} {apellido}".strip().title() or 'Sin paciente'
             
             motivo = f.get('Actividad', 'Sin motivo')
-            conjunto_tag = " 🔗" if tipo.lower() == "conjunto" else ""
+            conjunto_tag = " (conjunto)" if tipo.lower() == "conjunto" else ""
             
-            msg += f"⏰ *{hora}* — {paciente}\n"
-            msg += f"📋 {motivo}{conjunto_tag}\n"
+            msg += f"*{hora}* — {paciente} — {motivo}{conjunto_tag}\n"
         
         return msg
+

@@ -266,8 +266,9 @@ class FileMakerService:
                     user_data = data[0]['fieldData']
                     user_id = str(user_data.get('XUsuarioRRHH_Pk', ''))
                     nombre = user_data.get('Nombre')
+                    apellido = user_data.get('Apellido', '')
                     rol_str = user_data.get('ROL', '').lower().strip()
-                    return User(phone=phone, id=user_id, name=nombre, role=rol_str)
+                    return User(phone=phone, id=user_id, name=nombre, last_name=apellido, role=rol_str)
                 return None
 
             if resp.status_code == 500 and _es_sin_registros(resp):

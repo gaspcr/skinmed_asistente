@@ -61,14 +61,16 @@ class DoctorWorkflow(WorkflowHandler):
 
         # Default: enviar plantilla inicial + mensaje de ayuda
         await self._send_menu(user, phone)
-
-    async def _send_menu(self, user, phone: str):
-        """Envia la plantilla inicial y el mensaje de ayuda"""
-        await WhatsAppService.send_template(phone, user.name, "respuesta_inicial_doctores_uso_interno")
+        # Enviar mensaje de ayuda después del template inicial
         await WhatsAppService.send_message(
             phone,
             "💡 _Puedes escribir *menu* en cualquier momento para volver al inicio o *salir* para terminar el flujo._"
         )
+
+    async def _send_menu(self, user, phone: str):
+        """Envia la plantilla inicial"""
+        full_name = f"{user.name} {user.last_name}".strip()
+        await WhatsAppService.send_template(phone, full_name, "respuesta_inicial_doctores_uso_interno")
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
         logger.debug("Boton recibido: '%s'", button_title)
@@ -177,11 +179,11 @@ class DoctorWorkflow(WorkflowHandler):
 
         # Reglas por categoria:
         # - Enviar receta:    solo FileMaker
+        # - Agendar paciente: solo FileMaker
         # - Bloquear agenda:  solo notificar enfermeria
-        # - Agendar paciente: FileMaker + notificar enfermeria
         # - Otros:            FileMaker + notificar enfermeria
         guardar_en_fm = categoria != "Bloquear agenda"
-        notificar_enfermeria = categoria != "Enviar receta"
+        notificar_enfermeria = categoria not in ["Enviar receta", "Agendar paciente"]
 
         try:
             if guardar_en_fm:
