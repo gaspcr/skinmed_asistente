@@ -57,7 +57,7 @@ class AgendaFormatter:
         if not data:
             return "No hay citas agendadas para hoy."
         
-        msg = f"*Hola {doctor_name}*\nAgenda para hoy:\n\n"
+        msg = f"*Hola Dr(a). {doctor_name}*\nAgenda para hoy:\n\n"
         
         ignorar_tipo = ["Eliminada", "Bloqueada", "No Viene"]
         ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
@@ -71,7 +71,7 @@ class AgendaFormatter:
         validos.sort(key=lambda x: x['fieldData']['Hora'])
 
         if not validos:
-            return f"*{doctor_name}*, no tienes citas agendadas hoy."
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes citas agendadas hoy."
 
         for reg in validos:
             f = reg['fieldData']
@@ -79,7 +79,7 @@ class AgendaFormatter:
             tipo = f.get('Tipo', 'Desconocido')
             
             if tipo == "Disponible":
-                msg += f"*{hora}* — Disponible\n"
+                msg += f"*{hora}* - Disponible\n"
                 continue
 
             nombre = f.get('Pacientes::NOMBRE', '')
@@ -90,7 +90,7 @@ class AgendaFormatter:
             motivo = AgendaFormatter._abreviar(motivo_raw)
             conjunto_tag = " (conj)" if tipo.lower() == "conjunto" else ""
             
-            msg += f"*{hora}* — {paciente} — {motivo}{conjunto_tag}\n"
+            msg += f"*{hora}* - {paciente} - {motivo}*{conjunto_tag}*\n"
         
         return msg
 

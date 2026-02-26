@@ -7,7 +7,7 @@ class RecadosFormatter:
     @staticmethod
     def format(data: List[Dict], doctor_name: str, pacient_names: Optional[Dict[str, str]] = None) -> str:
         if not data:
-            return f"*{doctor_name}*, no tienes recados pendientes. ✅"
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes. ✅"
 
         pacient_names = pacient_names or {}
 
@@ -22,9 +22,9 @@ class RecadosFormatter:
                 recados.append({"entradas": parsed, "paciente": pac_name})
 
         if not recados:
-            return f"*{doctor_name}*, no tienes recados pendientes. ✅"
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes. ✅"
 
-        msg = f"*📋 Recados para {doctor_name}*\n"
+        msg = f"*📋 Recados para Dr(a). {doctor_name}*\n"
         msg += f"_{len(recados)} recado(s) encontrado(s)_\n"
         msg += "━━━━━━━━━━━━━━━\n"
 
