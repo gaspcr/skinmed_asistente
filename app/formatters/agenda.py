@@ -90,7 +90,7 @@ class AgendaFormatter:
             motivo = AgendaFormatter._abreviar(motivo_raw)
             conjunto_tag = " (conj)" if tipo.lower() == "conjunto" else ""
             
-            msg += f"*{hora}* - {paciente} - {motivo}*{conjunto_tag}*\n"
+            msg += f"*{hora}* - {paciente} - *{motivo}{conjunto_tag}*\n"
         
         return msg
 
