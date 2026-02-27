@@ -50,6 +50,9 @@ class Settings(BaseSettings):
     # --- Notificaciones ---
     CHIEF_NURSE_PHONE: str = Field(default="56944250961", description="Telefono de la jefa de enfermeria para notificaciones de recados")
 
+    # --- Session ---
+    SESSION_TIMEOUT_SECONDS: int = Field(default=120, description="Segundos de inactividad antes de cerrar la sesion automaticamente")
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"

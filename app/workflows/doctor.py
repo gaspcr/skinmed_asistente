@@ -10,6 +10,7 @@ from app.config import get_settings
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
+from app.workflows import session_timer
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.formatters.agenda import AgendaFormatter
@@ -32,6 +33,7 @@ class DoctorWorkflow(WorkflowHandler):
 
         if texto == "salir":
             await workflow_state.clear_state(phone)
+            await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
                 "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu* para volver al inicio."
@@ -53,6 +55,7 @@ class DoctorWorkflow(WorkflowHandler):
                     await self._send_menu(user, phone)
                 elif texto in ["no", "n"]:
                     await workflow_state.clear_state(phone)
+                    await session_timer.cancel(phone)
                     await WhatsAppService.send_message(
                         phone,
                         "Hasta luego. Cuando necesites algo, escribe cualquier mensaje o *menu*."
