@@ -7,7 +7,7 @@ class RecadosFormatter:
     @staticmethod
     def format(data: List[Dict], doctor_name: str, pacient_names: Optional[Dict[str, str]] = None) -> str:
         if not data:
-            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes. ✅"
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes."
 
         pacient_names = pacient_names or {}
 
@@ -22,14 +22,14 @@ class RecadosFormatter:
                 recados.append({"entradas": parsed, "paciente": pac_name})
 
         if not recados:
-            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes. ✅"
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes."
 
-        msg = f"*📋 Recados para Dr(a). {doctor_name}*\n"
+        msg = f"*Recados para Dr(a). {doctor_name}*\n"
         msg += f"_{len(recados)} recado(s) encontrado(s)_\n"
         msg += "━━━━━━━━━━━━━━━\n"
 
         for i, recado in enumerate(recados, 1):
-            msg += f"\n*Recado #{i}* — 🧑‍⚕️ {recado['paciente']}\n"
+            msg += f"\n*Recado #{i}* — {recado['paciente']}\n"
             # Mostrar solo las ultimas 3 entradas del hilo
             entradas = recado["entradas"]
             visibles = entradas[-3:] if len(entradas) > 3 else entradas
@@ -41,7 +41,7 @@ class RecadosFormatter:
                 fecha = entrada["fecha"]
                 hora = entrada["hora"]
                 mensaje = entrada["mensaje"]
-                msg += f"👤 *{autor}* — {fecha} {hora}\n"
+                msg += f"*{autor}* — {fecha} {hora}\n"
                 msg += f"   {mensaje}\n"
 
             msg += "━━━━━━━━━━━━━━━\n"

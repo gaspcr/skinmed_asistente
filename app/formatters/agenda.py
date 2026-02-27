@@ -1,4 +1,4 @@
-from typing import List, Dict
+from typing import List, Dict, Optional, Tuple
 
 # Mapeo de concepto de cobro / actividad a abreviación
 _ABREVIACIONES = {
@@ -45,6 +45,40 @@ _ABREVIACIONES = {
     "VENUS VIVA": "VV",
 }
 
+# Mapeo inverso: abreviación → nombre legible (uno representativo por abreviación)
+_GLOSARIO = {
+    "AH": "Ác. Hialurónico",
+    "BX": "Botox",
+    "BX+AH": "Botox + Ác. Hialurónico",
+    "BXMK": "Botox MKT",
+    "CM": "Células Madre",
+    "CO2": "CO2",
+    "CN": "Consulta",
+    "CTRL": "Control",
+    "CUR": "Curación",
+    "DBL": "Doublo",
+    "DBLMK": "Doublo MKT",
+    "DYS": "Dysport",
+    "EXO": "Exosomas",
+    "HCA": "Harmonyca",
+    "IPL": "IPL",
+    "MDG": "Mapeo Digital",
+    "MES": "Mesoterapia",
+    "NOB": "Nobleen",
+    "OP": "Operación",
+    "PIC": "Picolo Laser",
+    "PMA": "Plasma",
+    "PROT": "Protocolo",
+    "PRP": "PRP",
+    "REN": "Renas II",
+    "SCUP": "Sculptra",
+    "TC": "Teleconsulta",
+    "THU": "Thulium",
+    "TXP": "Trasplante de Pelo",
+    "VL": "Venus Legacy",
+    "VV": "Venus Viva",
+}
+
 
 class AgendaFormatter:
     @staticmethod
@@ -53,9 +87,11 @@ class AgendaFormatter:
         return _ABREVIACIONES.get(actividad, _ABREVIACIONES.get(actividad.upper(), actividad))
 
     @staticmethod
-    def format(data: List[Dict], doctor_name: str) -> str:
+    def format(data: List[Dict], doctor_name: str) -> Tuple[str, Optional[str]]:
+        """Formatea la agenda y retorna (mensaje_agenda, mensaje_glosario).
+        El glosario es None si no hay abreviaciones que mostrar."""
         if not data:
-            return "No hay citas agendadas para hoy."
+            return "No hay citas agendadas para hoy.", None
         
         msg = f"*Hola Dr(a). {doctor_name}*\nAgenda para hoy:\n\n"
         
@@ -71,7 +107,9 @@ class AgendaFormatter:
         validos.sort(key=lambda x: x['fieldData']['Hora'])
 
         if not validos:
-            return f"*Hola Dr(a). {doctor_name}*\nNo tienes citas agendadas hoy."
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes citas agendadas hoy.", None
+
+        abreviaturas_usadas = set()
 
         for reg in validos:
             f = reg['fieldData']
@@ -89,8 +127,22 @@ class AgendaFormatter:
             motivo_raw = f.get('Actividad', 'Sin motivo')
             motivo = AgendaFormatter._abreviar(motivo_raw)
             conjunto_tag = " (conj)" if tipo.lower() == "conjunto" else ""
+
+            # Registrar abreviatura solo si fue abreviada (distinto al original)
+            if motivo != motivo_raw:
+                abreviaturas_usadas.add(motivo)
             
             msg += f"*{hora}* - {paciente} - *{motivo}{conjunto_tag}*\n"
-        
-        return msg
+
+        # Generar glosario solo con las abreviaturas usadas
+        glossary = None
+        if abreviaturas_usadas:
+            lines = []
+            for abr in sorted(abreviaturas_usadas):
+                nombre_completo = _GLOSARIO.get(abr, abr)
+                lines.append(f"*{abr}*: {nombre_completo}")
+            glossary = "\n".join(lines)
+
+        return msg, glossary
+
 

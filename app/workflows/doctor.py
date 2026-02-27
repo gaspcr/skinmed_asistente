@@ -34,7 +34,7 @@ class DoctorWorkflow(WorkflowHandler):
             await workflow_state.clear_state(phone)
             await WhatsAppService.send_message(
                 phone,
-                "👋 Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu* para volver al inicio."
+                "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu* para volver al inicio."
             )
             return
 
@@ -55,7 +55,7 @@ class DoctorWorkflow(WorkflowHandler):
                     await workflow_state.clear_state(phone)
                     await WhatsAppService.send_message(
                         phone,
-                        "👋 ¡Hasta luego! Cuando necesites algo, escribe cualquier mensaje o *menu*."
+                        "Hasta luego. Cuando necesites algo, escribe cualquier mensaje o *menu*."
                     )
                 return
 
@@ -64,7 +64,7 @@ class DoctorWorkflow(WorkflowHandler):
         # Enviar mensaje de ayuda después del template inicial
         await WhatsAppService.send_message(
             phone,
-            "💡 _Puedes escribir *menu* en cualquier momento para volver al inicio o *salir* para terminar el flujo._"
+            "_Puedes escribir *menu* en cualquier momento para volver al inicio o *salir* para terminar el flujo._"
         )
 
     async def _send_menu(self, user, phone: str):
@@ -105,7 +105,7 @@ class DoctorWorkflow(WorkflowHandler):
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Otros"})
             await WhatsAppService.send_message(
                 phone,
-                "📝 *Categoría: Otros*\n\n"
+                "*Categoría: Otros*\n\n"
                 "Por favor escribe tu recado incluyendo el *nombre del paciente*.\n"
                 "Lo ingresaremos a FileMaker y dejaremos aviso a gerencia.\n\n"
                 "_Escribe tu mensaje a continuación:_"
@@ -137,7 +137,7 @@ class DoctorWorkflow(WorkflowHandler):
         if not match:
             await WhatsAppService.send_message(
                 phone,
-                "❌ Formato de fecha inválido. Por favor usa el formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
+                "Formato de fecha inválido. Por favor usa el formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
             )
             return
 
@@ -154,7 +154,7 @@ class DoctorWorkflow(WorkflowHandler):
         except ValueError:
             await WhatsAppService.send_message(
                 phone,
-                "❌ Fecha inválida. Verifica que el día y mes sean correctos.\n\nEjemplo: 05-02-26"
+                "Fecha inválida. Verifica que el día y mes sean correctos.\n\nEjemplo: 05-02-26"
             )
             await workflow_state.clear_state(phone)
 
@@ -174,8 +174,8 @@ class DoctorWorkflow(WorkflowHandler):
         hora = now.strftime("%H:%M:%S")
         fecha_display = now.strftime("%d-%m-%Y")
 
-        # Formatear texto del recado: "autor > fecha > hora\r  mensaje"
-        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r  {message_text}"
+        # Formatear texto del recado: "autor > fecha > hora\rmensaje"
+        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r{message_text}"
 
         # Reglas por categoria:
         # - Enviar receta:    solo FileMaker
@@ -217,9 +217,9 @@ class DoctorWorkflow(WorkflowHandler):
 
             await WhatsAppService.send_message(
                 phone,
-                "✅ *Recado procesado exitosamente*\n\n"
-                f"📋 Categoría: {categoria}\n"
-                f"📅 {fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
+                "*Recado procesado exitosamente*\n\n"
+                f"Categoría: {categoria}\n"
+                f"{fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
                 f"{confirmacion}"
             )
             await self._ask_continue(phone)
@@ -228,7 +228,7 @@ class DoctorWorkflow(WorkflowHandler):
             logger.error("Error al crear recado: %s", e)
             await WhatsAppService.send_message(
                 phone,
-                "❌ No se pudo registrar el recado. "
+                "No se pudo registrar el recado. "
                 "Por favor intenta de nuevo en unos minutos."
             )
 
@@ -244,8 +244,10 @@ class DoctorWorkflow(WorkflowHandler):
         """Envia agenda del dia o de una fecha especifica"""
         try:
             agenda_data = await FileMakerService.get_agenda_raw(user.id, date)
-            formatted_msg = AgendaFormatter.format(agenda_data, user.name)
+            formatted_msg, glossary = AgendaFormatter.format(agenda_data, user.name)
             await WhatsAppService.send_message(phone, formatted_msg)
+            if glossary:
+                await WhatsAppService.send_message(phone, glossary)
             await self._ask_continue(phone)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar agenda: %s", e)
