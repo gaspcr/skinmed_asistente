@@ -84,13 +84,6 @@ async def _timeout_check(phone: str):
         # Hubo actividad nueva, otro timer se encargará
         return
 
-    # Verificar que hay un workflow activo antes de enviar mensaje
-    step = await workflow_state.get_step(phone)
-    if step is None:
-        # No hay workflow activo, no enviar mensaje de timeout
-        await redis_svc.delete(_key(phone))
-        return
-
     # No hubo actividad → timeout
     logger.info("Timeout de inactividad para %s (%ds)", phone, timeout)
 

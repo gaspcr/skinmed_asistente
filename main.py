@@ -175,6 +175,10 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
             )
             return
 
+        # Registrar actividad y programar timeout de inactividad
+        await session_timer.touch(sender_phone)
+        session_timer.schedule_timeout(sender_phone)
+
         # Procesar segun tipo
         if msg.type == "text":
             message_text = msg.text.body if msg.text and hasattr(msg.text, 'body') else ""
@@ -193,10 +197,6 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
         elif msg.type in ["interactive", "button"]:
             btn_title = extract_button_title(msg)
             await handler.handle_button(user, sender_phone, btn_title, background_tasks)
-
-        # Registrar actividad y programar timeout de inactividad
-        await session_timer.touch(sender_phone)
-        session_timer.schedule_timeout(sender_phone)
 
     except ServicioNoDisponibleError as e:
         logger.error("Servicio externo no disponible: %s", e)
