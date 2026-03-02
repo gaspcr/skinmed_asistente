@@ -97,7 +97,7 @@ class DoctorWorkflow(WorkflowHandler):
             background_tasks.add_task(self._send_recados, user, phone)
 
         # Botones de plantilla recados (recados_de_doctores)
-        elif button_title == "Agendar paciente":
+        elif button_title == "Agendar Paciente":
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Agendar paciente"})
             await WhatsAppService.send_template(
                 phone, user.name, "agendar_paciente_doctores",
@@ -114,14 +114,14 @@ class DoctorWorkflow(WorkflowHandler):
                 "_Escribe tu mensaje a continuación:_"
             )
 
-        elif button_title == "Bloquear agenda (día)":
+        elif button_title == "Bloquear Agenda":
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Bloquear agenda"})
             await WhatsAppService.send_template(
                 phone, user.name, "bloquear_agenda_dia_doctores",
                 include_header=False, include_body=False,
             )
 
-        elif button_title == "Enviar recetas":
+        elif button_title == "Enviar Recetas":
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Enviar receta"})
             await WhatsAppService.send_template(
                 phone, user.name, "enviar_receta_doctores",
