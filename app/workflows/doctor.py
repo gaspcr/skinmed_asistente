@@ -91,7 +91,7 @@ class DoctorWorkflow(WorkflowHandler):
 
         elif button_title == "Enviar recado":
             logger.debug("Enviando plantilla recados por boton: '%s'", button_title)
-            await WhatsAppService.send_template(phone, user.name, "recados_de_doctores", include_header=False, include_body=True)
+            await WhatsAppService.send_template(phone, user.name, "sistema_recados", include_header=False, include_body=True)
 
         elif button_title == "Revisar mis recados":
             background_tasks.add_task(self._send_recados, user, phone)
