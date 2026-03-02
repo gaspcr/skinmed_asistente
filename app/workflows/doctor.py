@@ -276,7 +276,7 @@ class DoctorWorkflow(WorkflowHandler):
                     except Exception:
                         pacient_names[pac_id] = "Paciente desconocido"
 
-            formatted_msg = RecadosFormatter.format(recados_data, user.name, pacient_names)
+            formatted_msg = RecadosFormatter.format(recados_data, user.name, user.last_name, pacient_names)
             await WhatsAppService.send_message(phone, formatted_msg)
             await self._ask_continue(phone)
         except ServicioNoDisponibleError as e:

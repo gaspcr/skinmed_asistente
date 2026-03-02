@@ -5,9 +5,9 @@ class RecadosFormatter:
     """Formatea recados de FileMaker para WhatsApp."""
 
     @staticmethod
-    def format(data: List[Dict], doctor_name: str, pacient_names: Optional[Dict[str, str]] = None) -> str:
+    def format(data: List[Dict], doctor_name: str, doctor_lastname: str = "", pacient_names: Optional[Dict[str, str]] = None) -> str:
         if not data:
-            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes."
+            return f"*Hola Dr(a). {doctor_name} {doctor_lastname}*\nNo tienes recados pendientes."
 
         pacient_names = pacient_names or {}
 
@@ -22,17 +22,21 @@ class RecadosFormatter:
                 recados.append({"entradas": parsed, "paciente": pac_name})
 
         if not recados:
-            return f"*Hola Dr(a). {doctor_name}*\nNo tienes recados pendientes."
+            return f"*Hola Dr(a). {doctor_name} {doctor_lastname}*\nNo tienes recados pendientes."
 
-        msg = f"*Recados para Dr(a). {doctor_name}*\n"
+        msg = f"*Recados para Dr(a). {doctor_name} {doctor_lastname}*\n"
         msg += f"_{len(recados)} recado(s) encontrado(s)_\n"
         msg += "━━━━━━━━━━━━━━━\n"
 
         for i, recado in enumerate(recados, 1):
             msg += f"\n*Recado #{i}* — {recado['paciente']}\n"
-            # Mostrar solo las ultimas 3 entradas del hilo
+            # Los mensajes nuevos en FileMaker se agregan arriba (al principio).
+            # Tomamos los 3 primeros (los más nuevos) y los damos vuelta para 
+            # mostrarlos en orden cronológico (chat normal: el más nuevo al final).
             entradas = recado["entradas"]
-            visibles = entradas[-3:] if len(entradas) > 3 else entradas
+            visibles = entradas[:3] if len(entradas) > 3 else entradas[:]
+            visibles.reverse()
+
             if len(entradas) > 3:
                 msg += f"_... {len(entradas) - 3} mensaje(s) anterior(es)_\n"
 
