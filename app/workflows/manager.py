@@ -204,7 +204,8 @@ class ManagerWorkflow(WorkflowHandler):
             )
 
     async def _handle_doctor_selection(self, user, phone: str, message_text: str):
-        """Procesa la seleccion de doctor por numero"""
+        """Procesa la seleccion de doctor por numero, o si/no para continuar"""
+        texto = message_text.strip().lower()
         state_data = await workflow_state.get_data(phone)
         doctor_list = state_data.get("doctors", []) if state_data else []
         saved_date = state_data.get("date") if state_data else None
@@ -215,13 +216,28 @@ class ManagerWorkflow(WorkflowHandler):
             await WhatsAppService.send_message(phone, "Sesión expirada. Intenta de nuevo.")
             return
 
+        # "no" → salir del flujo
+        if texto == "no":
+            await workflow_state.clear_state(phone)
+            await WhatsAppService.send_message(
+                phone,
+                "¡Hasta luego! Cuando necesites algo, escribe cualquier mensaje o *menu*."
+            )
+            return
+
+        # "si" / "s" → volver al menu principal
+        if texto in ["si", "sí", "s"]:
+            await workflow_state.clear_state(phone)
+            await self._send_menu(user, phone)
+            return
+
         # Validar que sea un numero valido
         try:
-            selection = int(message_text.strip())
+            selection = int(texto)
         except ValueError:
             await WhatsAppService.send_message(
                 phone,
-                f"Por favor escribe un número entre 1 y {len(doctor_list)}."
+                f"Escribe un número entre 1 y {len(doctor_list)}, *si* para volver al menú, o *no* para salir."
             )
             return
 
@@ -233,8 +249,6 @@ class ManagerWorkflow(WorkflowHandler):
             return
 
         doctor_name = doctor_list[selection - 1]
-        await workflow_state.clear_state(phone)
-
         label = f"el {display_date}" if display_date else "hoy"
 
         # Obtener agenda solo de ese doctor
@@ -259,7 +273,12 @@ class ManagerWorkflow(WorkflowHandler):
             if glossary:
                 await WhatsAppService.send_message(phone, f"*Glosario:*\n{glossary}")
 
-            await self._ask_continue(phone)
+            # Mantener en la misma lista para elegir otro doctor
+            # (el estado ya sigue en waiting_for_doctor_selection)
+            await WhatsAppService.send_message(
+                phone,
+                "Escribe el número de otro doctor para ver su agenda, *si* para volver al menú, o *no* para salir."
+            )
 
         except ServicioNoDisponibleError as e:
             logger.error("Error al obtener agenda del doctor %s: %s", doctor_name, e)
