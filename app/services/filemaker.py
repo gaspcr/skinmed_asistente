@@ -211,6 +211,42 @@ class FileMakerService:
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
 
     @staticmethod
+    async def get_agenda_all_doctors(date: str = None) -> list:
+        """Obtiene agenda de TODOS los doctores para una fecha dada."""
+        settings = get_settings()
+        tz = pytz.timezone("America/Santiago")
+        today_str = date if date else datetime.now(tz).strftime("%m-%d-%Y")
+
+        query = {
+            "query": [
+                {
+                    "Fecha": today_str,
+                }
+            ]
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(settings.FM_AGENDA_LAYOUT, query)
+            return await FileMakerService._parsear_respuesta_find(resp, "get_agenda_all_doctors")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker get_agenda_all_doctors",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al obtener agenda general: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
     async def get_recados(doctor_id: str) -> list:
         """Obtiene recados de un doctor por su ID de FileMaker."""
         settings = get_settings()

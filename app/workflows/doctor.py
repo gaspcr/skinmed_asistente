@@ -223,6 +223,7 @@ class DoctorWorkflow(WorkflowHandler):
                 "*Recado procesado exitosamente*\n\n"
                 f"Categoría: {categoria}\n"
                 f"{fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
+                f"Recado: {message_text}\n\n"
                 f"{confirmacion}"
             )
             await self._ask_continue(phone)
