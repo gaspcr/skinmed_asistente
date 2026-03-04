@@ -97,10 +97,21 @@ class ManagerWorkflow(WorkflowHandler):
                 await self._ask_continue(phone)
                 return
 
+            # Filtrar citas invalidas
+            ignorar_tipo = ["Eliminada", "Bloqueada", "No Viene"]
+            ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
+
+            valid_data = [
+                r for r in all_data
+                if r["fieldData"].get("Tipo") not in ignorar_tipo
+                and r["fieldData"].get("Actividad", "").upper() not in ignorar_actividad
+                and r["fieldData"].get("Hora", "00:00:00") != "00:00:00"
+            ]
+
             # Agrupar citas por doctor
             # Usar OrderedDict para mantener el orden de aparicion
             doctors: OrderedDict[str, list] = OrderedDict()
-            for record in all_data:
+            for record in valid_data:
                 fd = record.get("fieldData", {})
                 doctor_name = fd.get("Recurso Humano::Nombre", "").strip()
                 if not doctor_name:
