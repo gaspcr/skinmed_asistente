@@ -222,7 +222,8 @@ class FileMakerService:
                 {
                     "Fecha": today_str,
                 }
-            ]
+            ],
+            "limit": 500
         }
 
         async def _buscar():
