@@ -98,7 +98,7 @@ class ManagerWorkflow(WorkflowHandler):
                 return
 
             # Filtrar citas invalidas
-            ignorar_tipo = ["Eliminada", "Bloqueada", "No Viene"]
+            ignorar_tipo = ["Eliminada", "Bloqueada", "No Viene", "Disponible"]
             ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
 
             valid_data = [
