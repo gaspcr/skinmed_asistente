@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
+from app.workflows import session_timer
 from app.workflows.doctor import DoctorWorkflow
 from app.workflows.manager import ManagerWorkflow
 from app.services.whatsapp import WhatsAppService
@@ -50,6 +51,7 @@ class HybridWorkflow(WorkflowHandler):
         if texto == "salir":
             await workflow_state.clear_state(phone)
             await _clear_active_profile(phone)
+            await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
                 "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu*."

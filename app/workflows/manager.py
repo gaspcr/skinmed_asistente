@@ -9,6 +9,7 @@ from fastapi import BackgroundTasks
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
+from app.workflows import session_timer
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.formatters.agenda import AgendaFormatter
@@ -45,6 +46,7 @@ class ManagerWorkflow(WorkflowHandler):
 
         if texto == "salir":
             await workflow_state.clear_state(phone)
+            await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
                 "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu*."
@@ -66,6 +68,7 @@ class ManagerWorkflow(WorkflowHandler):
                     await self._send_menu(user, phone)
                 else:
                     await workflow_state.clear_state(phone)
+                    await session_timer.cancel(phone)
                     await WhatsAppService.send_message(
                         phone,
                         "¡Hasta luego! Cuando necesites algo, escribe cualquier mensaje o *menu*."
@@ -219,6 +222,7 @@ class ManagerWorkflow(WorkflowHandler):
         # "no" → salir del flujo
         if texto == "no":
             await workflow_state.clear_state(phone)
+            await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
                 "¡Hasta luego! Cuando necesites algo, escribe cualquier mensaje o *menu*."
