@@ -12,6 +12,7 @@ from app.workflows import state as workflow_state
 from app.workflows import session_timer
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
+from app.services import redis as redis_svc
 from app.formatters.agenda import AgendaFormatter
 from app.exceptions import ServicioNoDisponibleError
 
@@ -20,6 +21,9 @@ logger = logging.getLogger(__name__)
 # Filtros de citas invalidas (compartidos con AgendaFormatter)
 _IGNORAR_TIPO = ["Eliminada", "Bloqueada", "No Viene", "Disponible"]
 _IGNORAR_ACTIVIDAD = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
+
+# TTL para el modo doctor activo (2 horas)
+_DOCTOR_MODE_TTL = 7200
 
 
 def _filtrar_citas_validas(data: list) -> list:
@@ -32,25 +36,64 @@ def _filtrar_citas_validas(data: list) -> list:
     ]
 
 
+def _doctor_mode_key(phone: str) -> str:
+    return f"manager:doctor_mode:{phone}"
+
+
+async def _is_doctor_mode(phone: str) -> bool:
+    return await redis_svc.get(_doctor_mode_key(phone)) is not None
+
+
+async def _set_doctor_mode(phone: str):
+    await redis_svc.set(_doctor_mode_key(phone), "1", ttl=_DOCTOR_MODE_TTL)
+
+
+async def _clear_doctor_mode(phone: str):
+    await redis_svc.delete(_doctor_mode_key(phone))
+
+
 @register_workflow("gerencia")
 class ManagerWorkflow(WorkflowHandler):
+
+    def __init__(self):
+        # Importar DoctorWorkflow aquí para evitar import circular
+        from app.workflows.doctor import DoctorWorkflow
+        self._doctor_workflow = DoctorWorkflow()
 
     async def handle_text(self, user, phone: str, message_text: str = ""):
         texto = message_text.strip().lower()
 
-        # Comandos globales
-        if texto == "menu":
-            await workflow_state.clear_state(phone)
-            await self._send_menu(user, phone)
-            return
-
+        # "salir" siempre termina TODO, sin importar donde estemos
         if texto == "salir":
             await workflow_state.clear_state(phone)
+            await _clear_doctor_mode(phone)
             await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
                 "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu*."
             )
+            return
+
+        # Verificar si estamos en modo doctor
+        in_doctor_mode = await _is_doctor_mode(phone)
+
+        if in_doctor_mode:
+            # "menu" desde modo doctor -> volver al menu de gerencia
+            if texto == "menu":
+                await workflow_state.clear_state(phone)
+                await _clear_doctor_mode(phone)
+                await self._send_menu(user, phone)
+                return
+
+            # Delegar todo lo demás al workflow de doctor
+            await self._doctor_workflow.handle_text(user, phone, message_text)
+            return
+
+        # --- Flujo normal de gerencia ---
+
+        if texto == "menu":
+            await workflow_state.clear_state(phone)
+            await self._send_menu(user, phone)
             return
 
         # Verificar flujo multi-paso
@@ -86,24 +129,47 @@ class ManagerWorkflow(WorkflowHandler):
                 "Indica la fecha que deseas consultar en formato *dd-mm-yy*\n\nEjemplo: 05-03-26"
             )
             return
+        elif texto == "3":
+            # Activar modo doctor
+            if user.role and user.role.lower() == "medico_gerencia":
+                await workflow_state.clear_state(phone)
+                await _set_doctor_mode(phone)
+                await self._doctor_workflow._send_menu(user, phone)
+            else:
+                await WhatsAppService.send_message(
+                    phone,
+                    "Esta opción no está disponible para tu perfil."
+                )
+            return
 
         # Cualquier otro texto: enviar menu
         await self._send_menu(user, phone)
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
+        # Si estamos en modo doctor, delegar botones
+        if await _is_doctor_mode(phone):
+            await self._doctor_workflow.handle_button(user, phone, button_title, background_tasks)
+            return
+
         logger.debug("Boton recibido en manager (inesperado): '%s'", button_title)
         await self._send_menu(user, phone)
 
     async def _send_menu(self, user, phone: str):
         """Envia el menu principal del manager"""
-        await WhatsAppService.send_message(
-            phone,
+        # Verificar si el usuario tiene perfil hibrido para mostrar opcion 3
+        show_doctor_option = user.role and user.role.lower() == "medico_gerencia"
+
+        msg = (
             f"*Hola {user.name} {user.last_name}* \n"
             "Soy tu asistente virtual. Selecciona una opción:\n\n"
             "*1.* Revisar agendas de doctores del día\n"
-            "*2.* Revisar agendas de doctores en otra fecha\n\n"
-            "_Escribe *menu* para volver al inicio o *salir* para terminar._"
+            "*2.* Revisar agendas de doctores en otra fecha\n"
         )
+        if show_doctor_option:
+            msg += "*3.* Revisar mi perfil de médico\n"
+        msg += "\n_Escribe *menu* para volver al inicio o *salir* para terminar._"
+
+        await WhatsAppService.send_message(phone, msg)
 
     async def _ask_continue(self, phone: str):
         """Pregunta si desea hacer algo mas"""
@@ -278,7 +344,6 @@ class ManagerWorkflow(WorkflowHandler):
                 await WhatsAppService.send_message(phone, f"*Glosario:*\n{glossary}")
 
             # Mantener en la misma lista para elegir otro doctor
-            # (el estado ya sigue en waiting_for_doctor_selection)
             await WhatsAppService.send_message(
                 phone,
                 "Escribe el número de otro doctor para ver su agenda, *si* para volver al menú, o *no* para salir."
