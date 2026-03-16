@@ -13,7 +13,7 @@ from app.services import redis as redis_svc
 from app.services import http as http_svc
 from app.middleware import verify_signature, SecurityHeadersMiddleware
 from app.exceptions import ServicioNoDisponibleError
-from app.workflows import doctor, manager, nurse
+from app.workflows import doctor, manager, nurse, hybrid
 from app.workflows.role_registry import get_workflow_handler
 from app.workflows import session_timer
 
