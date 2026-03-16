@@ -46,6 +46,16 @@ class HybridWorkflow(WorkflowHandler):
     async def handle_text(self, user, phone: str, message_text: str = ""):
         texto = message_text.strip().lower()
 
+        # "salir" siempre termina todo el flujo, sin importar donde estemos
+        if texto == "salir":
+            await workflow_state.clear_state(phone)
+            await _clear_active_profile(phone)
+            await WhatsAppService.send_message(
+                phone,
+                "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu*."
+            )
+            return
+
         # "perfiles" siempre vuelve al selector de perfil
         if texto == "perfiles":
             await workflow_state.clear_state(phone)
@@ -57,14 +67,8 @@ class HybridWorkflow(WorkflowHandler):
         active_profile = await _get_active_profile(phone)
 
         if active_profile:
-            # "salir" vuelve al selector de perfiles
-            if texto == "salir":
-                await workflow_state.clear_state(phone)
-                await _clear_active_profile(phone)
-                await self._send_profile_selector(user, phone)
-                return
-
-            # Delegar al workflow correspondiente
+            # "menu" dentro de un perfil activo -> menu del perfil
+            # (se delega al sub-workflow que ya maneja "menu")
             if active_profile == "medico":
                 await _doctor_workflow.handle_text(user, phone, message_text)
             else:
@@ -82,6 +86,9 @@ class HybridWorkflow(WorkflowHandler):
                 await workflow_state.clear_state(phone)
                 await _set_active_profile(phone, "gerencia")
                 await _manager_workflow._send_menu(user, phone)
+            elif texto == "menu":
+                # Re-mostrar el selector
+                await self._send_profile_selector(user, phone)
             else:
                 await WhatsAppService.send_message(
                     phone,
