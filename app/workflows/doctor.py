@@ -186,7 +186,7 @@ class DoctorWorkflow(WorkflowHandler):
         # - Bloquear agenda:  solo notificar enfermeria
         # - Otros:            FileMaker + notificar enfermeria
         guardar_en_fm = categoria != "Bloquear agenda"
-        notificar_enfermeria = categoria not in ["Enviar receta", "Agendar Hora"]
+        notificar_enfermeria = categoria not in ["Enviar receta", "Agendar paciente"]
 
         try:
             if guardar_en_fm:
