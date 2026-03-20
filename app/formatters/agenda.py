@@ -125,7 +125,7 @@ class AgendaFormatter:
             
             motivo_raw = f.get('Actividad', 'Sin motivo')
             motivo = AgendaFormatter._abreviar(motivo_raw)
-            conjunto_tag = " (conj)" if tipo.lower() == "conjunto" else ""
+            conjunto_tag = "(conj)" if tipo.lower() == "conjunto" else ""
 
             # Registrar abreviatura solo si fue abreviada (distinto al original)
             if motivo != motivo_raw:
