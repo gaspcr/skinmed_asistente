@@ -43,6 +43,12 @@ _ABREVIACIONES = {
     "TRASPLANTE DE PELO": "TXP",
     "VENUS LEGACY": "VL",
     "VENUS VIVA": "VV",
+    "SOP": "SOPRANO",
+    "ALEX": "ALEXANDRITA",
+    "VENUS": "VENUS",
+    "CRIO": "CRIOLIPOLOSIS",
+    "HIFU": "DOUBLO",
+    "LIMP": "LIMPIEZA FACIAL"
 }
 
 # Mapeo inverso: abreviación → nombre legible (uno representativo por abreviación)
@@ -76,6 +82,12 @@ _GLOSARIO = {
     "TXP": "Trasplante de Pelo",
     "VL": "Venus Legacy",
     "VV": "Venus Viva",
+    "SOP": "SOPRANO",
+    "ALEX": "ALEXANDRITA",
+    "VENUS": "VENUS",
+    "CRIO": "CRIOLIPOLOSIS",
+    "HIFU": "DOUBLO",
+    "LIMP": "LIMPIEZA FACIAL"
 }
 
 
