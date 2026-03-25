@@ -44,11 +44,11 @@ _ABREVIACIONES = {
     "VENUS LEGACY": "VL",
     "VENUS VIVA": "VV",
     "SOP": "SOPRANO",
-    "ALEX": "ALEXANDRITA",
+    "ALEXANDRITA": "ALEX",
     "VENUS": "VENUS",
-    "CRIO": "CRIOLIPOLOSIS",
-    "HIFU": "DOUBLO",
-    "LIMP": "LIMPIEZA FACIAL"
+    "CRIOLIPOLISIS": "CRIO",
+    "DOUBLO": "HIFU",
+    "LIMPIEZA FACIAL": "LIMP"
 }
 
 # Mapeo inverso: abreviación → nombre legible (uno representativo por abreviación)
