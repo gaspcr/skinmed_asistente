@@ -100,8 +100,9 @@ class WhatsAppService:
 
         async def _enviar():
             client = http_svc.get_client()
+            logger.info("[WSP] send_template payload: %s", payload)
             resp = await client.post(url, json=payload, headers=headers)
-            logger.info("[WSP] send_template '%s' a %s -> status=%d", template_name, to_phone, resp.status_code)
+            logger.info("[WSP] send_template '%s' a %s -> status=%d, body=%s", template_name, to_phone, resp.status_code, resp.text)
             if resp.status_code >= 500:
                 resp.raise_for_status()
             elif resp.status_code >= 400:
