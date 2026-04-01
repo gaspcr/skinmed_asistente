@@ -34,6 +34,9 @@ class WhatsAppService:
         async def _enviar():
             client = http_svc.get_client()
             resp = await client.post(url, json=payload, headers=headers)
+            logger.info("[WSP] send_message a %s -> status=%d", to_phone, resp.status_code)
+            if resp.status_code >= 400:
+                logger.error("[WSP] send_message error response: %s", resp.text)
             if resp.status_code >= 500:
                 resp.raise_for_status()
 
@@ -98,11 +101,12 @@ class WhatsAppService:
         async def _enviar():
             client = http_svc.get_client()
             resp = await client.post(url, json=payload, headers=headers)
+            logger.info("[WSP] send_template '%s' a %s -> status=%d", template_name, to_phone, resp.status_code)
             if resp.status_code >= 500:
                 resp.raise_for_status()
             elif resp.status_code >= 400:
                 logger.error(
-                    "WhatsApp API retorno %d: %s",
+                    "[WSP] send_template error response %d: %s",
                     resp.status_code, resp.text
                 )
 

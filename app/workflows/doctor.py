@@ -24,14 +24,17 @@ class DoctorWorkflow(WorkflowHandler):
 
     async def handle_text(self, user, phone: str, message_text: str = ""):
         texto = message_text.strip().lower()
+        logger.info("[DOCTOR] handle_text: phone=%s, texto='%s', user_role=%s", phone, texto, getattr(user, 'role', 'N/A'))
 
         # Comandos globales: menu y salir (siempre disponibles)
         if texto == "menu":
+            logger.info("[DOCTOR] Comando 'menu' recibido de %s", phone)
             await workflow_state.clear_state(phone)
             await self._send_menu(user, phone)
             return
 
         if texto == "salir":
+            logger.info("[DOCTOR] Comando 'salir' recibido de %s", phone)
             await workflow_state.clear_state(phone)
             await session_timer.cancel(phone)
             await WhatsAppService.send_message(
@@ -42,14 +45,18 @@ class DoctorWorkflow(WorkflowHandler):
 
         # Verificar si el usuario esta en un flujo multi-paso
         step = await workflow_state.get_step(phone)
+        logger.info("[DOCTOR] Step actual para %s: %s", phone, step)
         if step:
             if step == "waiting_for_date":
+                logger.info("[DOCTOR] Procesando date input de %s", phone)
                 await self._handle_date_input(user, phone, message_text)
                 return
             elif step == "waiting_for_recado":
+                logger.info("[DOCTOR] Procesando recado input de %s", phone)
                 await self._handle_recado_input(user, phone, message_text)
                 return
             elif step == "waiting_for_continue":
+                logger.info("[DOCTOR] En waiting_for_continue, respuesta='%s' de %s", texto, phone)
                 if texto in ["si", "sí", "s"]:
                     await workflow_state.clear_state(phone)
                     await self._send_menu(user, phone)
@@ -60,9 +67,12 @@ class DoctorWorkflow(WorkflowHandler):
                         phone,
                         "Hasta luego. Cuando necesites algo, escribe cualquier mensaje o *menu*."
                     )
+                else:
+                    logger.warning("[DOCTOR] Respuesta no reconocida en waiting_for_continue: '%s' de %s", texto, phone)
                 return
 
         # Default: enviar plantilla inicial + mensaje de ayuda
+        logger.info("[DOCTOR] Sin step activo, enviando menu inicial a %s", phone)
         await self._send_menu(user, phone)
         # Enviar mensaje de ayuda después del template inicial
         await WhatsAppService.send_message(
@@ -73,7 +83,9 @@ class DoctorWorkflow(WorkflowHandler):
     async def _send_menu(self, user, phone: str):
         """Envia la plantilla inicial"""
         full_name = f"{user.name} {user.last_name}".strip()
+        logger.info("[DOCTOR] _send_menu: enviando template 'respuesta_inicial_doctores_uso_interno' a %s (nombre=%s)", phone, full_name)
         await WhatsAppService.send_template(phone, full_name, "respuesta_inicial_doctores_uso_interno")
+        logger.info("[DOCTOR] _send_menu: template enviado (o intentado) para %s", phone)
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
         logger.debug("Boton recibido: '%s'", button_title)

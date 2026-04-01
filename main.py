@@ -155,19 +155,26 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
         # Autenticacion
         user = await AuthService.get_user_by_phone(sender_phone)
         if not user:
+            logger.warning("[MAIN] Usuario no encontrado para phone=%s", sender_phone)
             return
+
+        logger.info("[MAIN] Usuario autenticado: phone=%s, role=%s, name=%s", sender_phone, user.role, user.name)
 
         # Verificar handler del rol
         handler = get_workflow_handler(user.role)
         if not handler:
+            logger.error("[MAIN] No hay handler para rol='%s' de phone=%s", user.role, sender_phone)
             await WhatsAppService.send_message(
                 sender_phone,
                 f"Lo siento, tu rol '{user.role}' no está configurado en el sistema."
             )
             return
 
+        logger.info("[MAIN] Handler resuelto: %s para phone=%s", type(handler).__name__, sender_phone)
+
         # Manejo de tipos de mensaje no soportados
         if msg.type not in TIPOS_MENSAJE_SOPORTADOS:
+            logger.info("[MAIN] Tipo de mensaje no soportado: '%s' de phone=%s", msg.type, sender_phone)
             await WhatsAppService.send_message(
                 sender_phone,
                 "Lo siento, este tipo de mensaje no es soportado. "
@@ -182,6 +189,7 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
         # Procesar segun tipo
         if msg.type == "text":
             message_text = msg.text.body if msg.text and hasattr(msg.text, 'body') else ""
+            logger.info("[MAIN] Mensaje de texto recibido de %s: '%s'", sender_phone, message_text[:50])
 
             # Sanitizar: limitar longitud
             if len(message_text) > settings.MAX_MESSAGE_LENGTH:
@@ -196,6 +204,7 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
 
         elif msg.type in ["interactive", "button"]:
             btn_title = extract_button_title(msg)
+            logger.info("[MAIN] Boton recibido de %s: '%s'", sender_phone, btn_title)
             await handler.handle_button(user, sender_phone, btn_title, background_tasks)
 
     except ServicioNoDisponibleError as e:
