@@ -49,6 +49,10 @@ No test suite or linter is configured.
 - `RATE_LIMIT_MAX` — Max messages per rate limit window (default: `30`)
 - `RATE_LIMIT_WINDOW` — Rate limit window in seconds (default: `60`)
 - `MAX_MESSAGE_LENGTH` — Max accepted text message length (default: `500`)
+- `LLM_ENABLED` — Enable LLM mode (`True`) or use legacy strict mode (`False`) (default: `True`)
+- `OPENAI_API_KEY` — API Key de OpenAI (required when `LLM_ENABLED=True`)
+- `LLM_MODEL` — OpenAI model to use (default: `gpt-4o-mini`)
+- `LLM_MAX_HISTORY` — Max conversation messages to keep for LLM context (default: `10`)
 
 All required vars are validated at startup via `app/config.py` using `pydantic-settings`. The app refuses to start if any are missing.
 
@@ -76,8 +80,10 @@ All required vars are validated at startup via `app/config.py` using `pydantic-s
 - `app/services/filemaker.py` — FileMaker Data API client with 14-min token caching, auto 401-retry, retry with backoff, and circuit breaker protection
 - `app/services/whatsapp.py` — WhatsApp Business API client (text, templates) with retry on 5xx/connection errors
 - `app/middleware.py` — HMAC-SHA256 webhook signature verification + `SecurityHeadersMiddleware` (HSTS, X-Frame-Options, nosniff, XSS protection)
+- `app/services/llm.py` — LLM service using Instructor + OpenAI for structured Function Calling with Pydantic response models
 - `app/auth/` — User model and auth service with phone-based lookup (cached in Redis)
 - `app/workflows/` — Role-based handlers dispatched via decorator registration
+- `app/workflows/tools/doctor_tools.py` — Pydantic tool schemas for doctor workflow (ConsultarAgendaHoy, ConsultarAgendaOtraFecha, EnviarRecado, VerRecados, Despedirse, ResponderConversacion)
 - `app/workflows/state.py` — Unified workflow state management (get_state/set_state/clear_state)
 - `app/formatters/agenda.py` — Formats appointment data for WhatsApp display
 - `app/exceptions.py` — Custom exceptions (`ServicioNoDisponibleError`, `FileMakerAuthError`)

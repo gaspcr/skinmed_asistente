@@ -1,0 +1,179 @@
+"""
+Servicio de LLM con Instructor para Function Calling estructurado.
+
+Utiliza OpenAI + Instructor para forzar al modelo a responder con
+clases Pydantic tipadas, eliminando la necesidad de parsing manual.
+El historial de conversacion se mantiene en Redis para darle contexto
+al modelo entre mensajes.
+"""
+import logging
+from datetime import datetime
+from typing import Union, Type
+
+import instructor
+from openai import AsyncOpenAI
+
+import pytz
+
+from app.config import get_settings
+from app.services import redis as redis_svc
+
+logger = logging.getLogger(__name__)
+
+# Cliente de Instructor (singleton lazy)
+_client: instructor.AsyncInstructor | None = None
+
+
+def _get_client() -> instructor.AsyncInstructor:
+    """Obtiene o crea el cliente de Instructor parcheado sobre OpenAI."""
+    global _client
+    if _client is None:
+        settings = get_settings()
+        openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        _client = instructor.from_openai(openai_client)
+        logger.info("Cliente Instructor/OpenAI inicializado")
+    return _client
+
+
+def _build_system_prompt(user_name: str, user_role: str) -> str:
+    """
+    Construye el system prompt del agente para un rol especifico.
+
+    El prompt define la personalidad, las reglas y el contexto temporal
+    que el LLM usará para decidir qué herramienta invocar.
+    """
+    tz = pytz.timezone("America/Santiago")
+    now = datetime.now(tz)
+    fecha_hoy = now.strftime("%d de %B de %Y")
+    dia_semana = now.strftime("%A")
+    hora_actual = now.strftime("%H:%M")
+
+    # Mapeo de días y meses al español
+    dias_map = {
+        "Monday": "lunes", "Tuesday": "martes", "Wednesday": "miércoles",
+        "Thursday": "jueves", "Friday": "viernes", "Saturday": "sábado",
+        "Sunday": "domingo",
+    }
+    meses_map = {
+        "January": "enero", "February": "febrero", "March": "marzo",
+        "April": "abril", "May": "mayo", "June": "junio",
+        "July": "julio", "August": "agosto", "September": "septiembre",
+        "October": "octubre", "November": "noviembre", "December": "diciembre",
+    }
+
+    for en, es in meses_map.items():
+        fecha_hoy = fecha_hoy.replace(en, es)
+    dia_semana = dias_map.get(dia_semana, dia_semana)
+
+    return f"""Eres el asistente virtual de la Clínica SkinMed por WhatsApp.
+Estás hablando con el/la Dr(a). {user_name}, quien es {user_role} de la clínica.
+
+FECHA Y HORA ACTUAL:
+- Hoy es {dia_semana}, {fecha_hoy}
+- Hora actual: {hora_actual} (hora de Chile)
+
+TU COMPORTAMIENTO:
+- Responde siempre en español chileno, de forma profesional pero cercana.
+- Sé conciso: las respuestas se envían por WhatsApp y deben ser breves.
+- Cuando el doctor pida ver su agenda sin especificar fecha, usa la herramienta de agenda de hoy.
+- Cuando mencione una fecha (mañana, lunes, 15 de abril, etc.), calcula la fecha exacta usando la fecha actual como referencia y usa la herramienta de agenda otra fecha.
+- El formato de fecha para el sistema es MM-DD-YYYY (mes-día-año).
+- Si el doctor quiere dejar un recado, identifica la categoría correcta y copia su mensaje textualmente.
+- Si el doctor solo saluda o hace una pregunta general, responde amablemente y ofrece las opciones disponibles.
+- NUNCA inventes datos médicos, agendas o información de pacientes.
+
+ACCIONES DISPONIBLES:
+1. Consultar agenda del día de hoy
+2. Consultar agenda de otra fecha
+3. Enviar recado (agendar paciente, enviar receta, bloquear agenda, u otro)
+4. Ver recados pendientes
+5. Despedirse / terminar la conversación
+6. Responder de forma conversacional (saludos, dudas, etc.)"""
+
+
+async def classify_intent(
+    phone: str,
+    message: str,
+    user_name: str,
+    user_role: str,
+    response_model: Type,
+) -> Union[object, None]:
+    """
+    Clasifica la intencion del usuario usando el LLM.
+
+    Envia el historial de conversacion + el mensaje nuevo a OpenAI
+    con Instructor, forzando una respuesta tipada con Pydantic.
+
+    Args:
+        phone: Numero de telefono (para recuperar historial)
+        message: El mensaje de texto del usuario
+        user_name: Nombre del doctor
+        user_role: Rol del usuario
+        response_model: Union de las clases Pydantic permitidas
+
+    Returns:
+        Instancia de una de las clases Pydantic del response_model
+    """
+    settings = get_settings()
+    client = _get_client()
+
+    # Construir mensajes con historial
+    system_prompt = _build_system_prompt(user_name, user_role)
+    messages = [{"role": "system", "content": system_prompt}]
+
+    # Agregar historial de conversacion desde Redis
+    history = await redis_svc.get_history(phone)
+    messages.extend(history)
+
+    # Agregar el mensaje actual del usuario
+    messages.append({"role": "user", "content": message})
+
+    try:
+        response = await client.chat.completions.create(
+            model=settings.LLM_MODEL,
+            response_model=response_model,
+            messages=messages,
+            temperature=0.3,  # Baja temperatura para decisiones consistentes
+            max_retries=2,    # Instructor reintenta si el JSON no valida
+        )
+
+        # Guardar en historial: mensaje del usuario
+        await redis_svc.push_history(
+            phone, "user", message,
+            max_messages=settings.LLM_MAX_HISTORY,
+        )
+
+        # Guardar en historial: respuesta resumida del asistente
+        # (guardamos el tipo de accion para contexto, no el JSON completo)
+        assistant_summary = _summarize_response(response)
+        await redis_svc.push_history(
+            phone, "assistant", assistant_summary,
+            max_messages=settings.LLM_MAX_HISTORY,
+        )
+
+        logger.info(
+            "[LLM] Clasificacion para %s: %s",
+            phone, type(response).__name__,
+        )
+        return response
+
+    except Exception as e:
+        logger.error("[LLM] Error al clasificar intencion de %s: %s", phone, e)
+        raise
+
+
+def _summarize_response(response: object) -> str:
+    """
+    Genera un resumen legible de la respuesta del LLM para guardar en el historial.
+    Esto ayuda al modelo a recordar qué hizo en turnos anteriores.
+    """
+    class_name = type(response).__name__
+
+    if hasattr(response, "mensaje_confirmacion"):
+        return response.mensaje_confirmacion
+    elif hasattr(response, "mensaje_despedida"):
+        return response.mensaje_despedida
+    elif hasattr(response, "mensaje"):
+        return response.mensaje
+    else:
+        return f"[Acción: {class_name}]"

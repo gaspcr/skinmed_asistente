@@ -1,6 +1,20 @@
+"""
+Workflow del médico con soporte dual: modo LLM y modo estricto (legacy).
+
+Modo LLM (LLM_ENABLED=True):
+  Usa inteligencia artificial para clasificar la intención del doctor
+  y ejecutar la acción correspondiente via Function Calling.
+
+Modo estricto (LLM_ENABLED=False):
+  Usa la máquina de estados original con menús, regex y flujos fijos.
+  Útil como fallback si hay problemas con la API de OpenAI.
+
+Los botones de WhatsApp funcionan igual en ambos modos.
+"""
 import logging
 import re
 from datetime import datetime
+from typing import Union
 
 import pytz
 from fastapi import BackgroundTasks
@@ -11,52 +25,139 @@ from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
 from app.workflows import session_timer
+from app.workflows.tools.doctor_tools import (
+    ConsultarAgendaHoy,
+    ConsultarAgendaOtraFecha,
+    EnviarRecado,
+    VerRecados,
+    Despedirse,
+    ResponderConversacion,
+)
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
+from app.services import llm as llm_svc
+from app.services import redis as redis_svc
 from app.formatters.agenda import AgendaFormatter
 from app.formatters.recados import RecadosFormatter
 from app.exceptions import ServicioNoDisponibleError
 
 logger = logging.getLogger(__name__)
 
+# Union type de todas las herramientas disponibles para el médico
+DoctorToolUnion = Union[
+    ConsultarAgendaHoy,
+    ConsultarAgendaOtraFecha,
+    EnviarRecado,
+    VerRecados,
+    Despedirse,
+    ResponderConversacion,
+]
+
+
 @register_workflow("medico")
 class DoctorWorkflow(WorkflowHandler):
 
+    def _is_llm_enabled(self) -> bool:
+        """Verifica si el modo LLM está habilitado via variable de entorno."""
+        settings = get_settings()
+        return settings.LLM_ENABLED
+
+    # =========================================================================
+    # ENTRY POINT — delega al modo correcto
+    # =========================================================================
+
     async def handle_text(self, user, phone: str, message_text: str = ""):
         texto = message_text.strip().lower()
-        logger.info("[DOCTOR] handle_text: phone=%s, texto='%s', user_role=%s", phone, texto, getattr(user, 'role', 'N/A'))
 
-        # Comandos globales: menu y salir (siempre disponibles)
-        if texto == "menu":
-            logger.info("[DOCTOR] Comando 'menu' recibido de %s", phone)
-            await workflow_state.clear_state(phone)
-            await self._send_menu(user, phone)
-            return
-
+        # "salir" siempre funciona igual en ambos modos
         if texto == "salir":
-            logger.info("[DOCTOR] Comando 'salir' recibido de %s", phone)
             await workflow_state.clear_state(phone)
             await session_timer.cancel(phone)
+            if self._is_llm_enabled():
+                await redis_svc.clear_history(phone)
             await WhatsAppService.send_message(
                 phone,
                 "Flujo finalizado. Cuando necesites algo, escribe cualquier mensaje o *menu* para volver al inicio."
             )
             return
 
-        # Verificar si el usuario esta en un flujo multi-paso
+        # Flujo multi-paso pendiente del recado (compartido entre ambos modos)
         step = await workflow_state.get_step(phone)
-        logger.info("[DOCTOR] Step actual para %s: %s", phone, step)
+        if step == "waiting_for_recado":
+            await self._handle_recado_input(user, phone, message_text)
+            return
+
+        # Delegar según modo
+        if self._is_llm_enabled():
+            await self._handle_text_llm(user, phone, message_text)
+        else:
+            await self._handle_text_legacy(user, phone, message_text, step)
+
+    # =========================================================================
+    # MODO LLM — clasificación por inteligencia artificial
+    # =========================================================================
+
+    async def _handle_text_llm(self, user, phone: str, message_text: str):
+        """Procesa texto usando LLM + Function Calling."""
+        try:
+            response = await llm_svc.classify_intent(
+                phone=phone,
+                message=message_text,
+                user_name=f"{user.name} {user.last_name}".strip(),
+                user_role="médico",
+                response_model=DoctorToolUnion,
+            )
+        except Exception as e:
+            logger.error("Error LLM para %s, usando fallback menu: %s", phone, e)
+            await self._send_menu(user, phone)
+            return
+
+        # Ejecutar la acción según la herramienta elegida por la IA
+        if isinstance(response, ConsultarAgendaHoy):
+            await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
+            await self._send_agenda(user, phone, None)
+
+        elif isinstance(response, ConsultarAgendaOtraFecha):
+            await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
+            await self._send_agenda(user, phone, response.fecha)
+
+        elif isinstance(response, EnviarRecado):
+            await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
+            await self._process_recado(user, phone, response)
+
+        elif isinstance(response, VerRecados):
+            await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
+            await self._send_recados(user, phone)
+
+        elif isinstance(response, Despedirse):
+            await workflow_state.clear_state(phone)
+            await session_timer.cancel(phone)
+            await redis_svc.clear_history(phone)
+            await WhatsAppService.send_message(phone, response.mensaje_despedida)
+
+        elif isinstance(response, ResponderConversacion):
+            await WhatsAppService.send_message(phone, response.mensaje)
+
+    # =========================================================================
+    # MODO ESTRICTO (LEGACY) — máquina de estados original
+    # =========================================================================
+
+    async def _handle_text_legacy(self, user, phone: str, message_text: str, step: str = None):
+        """Procesa texto usando la máquina de estados original (sin LLM)."""
+        texto = message_text.strip().lower()
+
+        # Comando global: menu
+        if texto == "menu":
+            await workflow_state.clear_state(phone)
+            await self._send_menu(user, phone)
+            return
+
+        # Verificar flujo multi-paso
         if step:
             if step == "waiting_for_date":
-                logger.info("[DOCTOR] Procesando date input de %s", phone)
                 await self._handle_date_input(user, phone, message_text)
                 return
-            elif step == "waiting_for_recado":
-                logger.info("[DOCTOR] Procesando recado input de %s", phone)
-                await self._handle_recado_input(user, phone, message_text)
-                return
             elif step == "waiting_for_continue":
-                logger.info("[DOCTOR] En waiting_for_continue, respuesta='%s' de %s", texto, phone)
                 if texto in ["si", "sí", "s"]:
                     await workflow_state.clear_state(phone)
                     await self._send_menu(user, phone)
@@ -67,27 +168,59 @@ class DoctorWorkflow(WorkflowHandler):
                         phone,
                         "Hasta luego. Cuando necesites algo, escribe cualquier mensaje o *menu*."
                     )
-                else:
-                    logger.warning("[DOCTOR] Respuesta no reconocida en waiting_for_continue: '%s' de %s", texto, phone)
                 return
 
         # Default: enviar plantilla inicial + mensaje de ayuda
-        logger.info("[DOCTOR] Sin step activo, enviando menu inicial a %s", phone)
         await self._send_menu(user, phone)
-        # Enviar mensaje de ayuda después del template inicial
         await WhatsAppService.send_message(
             phone,
             "_Puedes escribir *menu* en cualquier momento para volver al inicio o *salir* para terminar el flujo._"
         )
 
+    async def _handle_date_input(self, user, phone: str, message_text: str):
+        """Procesa la entrada de fecha del usuario (modo legacy)."""
+        date_pattern = r'^(\d{2})-(\d{2})-(\d{2})$'
+        match = re.match(date_pattern, message_text.strip())
+
+        if not match:
+            await WhatsAppService.send_message(
+                phone,
+                "Formato de fecha inválido. Por favor usa el formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
+            )
+            return
+
+        day, month, year = match.groups()
+
+        try:
+            full_year = f"20{year}"
+            date_obj = datetime.strptime(f"{day}-{month}-{full_year}", "%d-%m-%Y")
+            filemaker_date = date_obj.strftime("%m-%d-%Y")
+
+            await workflow_state.clear_state(phone)
+            await self._send_agenda(user, phone, filemaker_date)
+
+        except ValueError:
+            await WhatsAppService.send_message(
+                phone,
+                "Fecha inválida. Verifica que el día y mes sean correctos.\n\nEjemplo: 05-02-26"
+            )
+            await workflow_state.clear_state(phone)
+
+    # =========================================================================
+    # MENÚ Y BOTONES (compartidos entre ambos modos)
+    # =========================================================================
+
     async def _send_menu(self, user, phone: str):
         """Envia la plantilla inicial"""
         full_name = f"{user.name} {user.last_name}".strip()
-        logger.info("[DOCTOR] _send_menu: enviando template 'respuesta_inicial_doctores_uso_interno' a %s (nombre=%s)", phone, full_name)
         await WhatsAppService.send_template(phone, full_name, "respuesta_inicial_doctores_uso_interno")
-        logger.info("[DOCTOR] _send_menu: template enviado (o intentado) para %s", phone)
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
+        """
+        Maneja botones de plantillas de WhatsApp.
+        Los botones funcionan con lógica directa (sin LLM) en ambos modos
+        porque el título del botón es determinístico.
+        """
         logger.debug("Boton recibido: '%s'", button_title)
 
         # Botones de plantilla inicial (respuesta_inicial_doctores_uso_interno)
@@ -144,59 +277,85 @@ class DoctorWorkflow(WorkflowHandler):
             logger.warning("Boton no reconocido: '%s'", button_title)
             await WhatsAppService.send_message(phone, "Opción no reconocida. Por favor intenta de nuevo.")
 
-    async def _handle_date_input(self, user, phone: str, message_text: str):
-        """Procesa la entrada de fecha del usuario para consulta de agenda"""
-        date_pattern = r'^(\d{2})-(\d{2})-(\d{2})$'
-        match = re.match(date_pattern, message_text.strip())
+    # =========================================================================
+    # ACCIONES DE NEGOCIO (compartidas entre ambos modos)
+    # =========================================================================
 
-        if not match:
-            await WhatsAppService.send_message(
-                phone,
-                "Formato de fecha inválido. Por favor usa el formato *dd-mm-yy*\n\nEjemplo: 05-02-26"
-            )
-            return
-
-        day, month, year = match.groups()
-
-        try:
-            full_year = f"20{year}"
-            date_obj = datetime.strptime(f"{day}-{month}-{full_year}", "%d-%m-%Y")
-            filemaker_date = date_obj.strftime("%m-%d-%Y")
-
-            await workflow_state.clear_state(phone)
-            await self._send_agenda(user, phone, filemaker_date)
-
-        except ValueError:
-            await WhatsAppService.send_message(
-                phone,
-                "Fecha inválida. Verifica que el día y mes sean correctos.\n\nEjemplo: 05-02-26"
-            )
-            await workflow_state.clear_state(phone)
-
-    async def _handle_recado_input(self, user, phone: str, message_text: str):
-        """Procesa el texto del recado y lo crea en FileMaker"""
-        # Obtener datos del estado (categoria)
-        state_data = await workflow_state.get_data(phone)
-        categoria = state_data.get("categoria", "Otros") if state_data else "Otros"
-
-        # Limpiar estado antes de procesar
-        await workflow_state.clear_state(phone)
-
-        # Obtener fecha y hora actual en zona horaria de Chile
+    async def _process_recado(self, user, phone: str, recado: EnviarRecado):
+        """Procesa un recado detectado directamente por la IA (sin flujo de botones)."""
         tz = pytz.timezone("America/Santiago")
         now = datetime.now(tz)
         fecha = now.strftime("%m-%d-%Y")
         hora = now.strftime("%H:%M:%S")
         fecha_display = now.strftime("%d-%m-%Y")
 
-        # Formatear texto del recado: "autor > fecha > hora\rmensaje"
+        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r{recado.texto_recado}"
+
+        categoria = recado.categoria
+        guardar_en_fm = categoria != "Bloquear agenda"
+        notificar_enfermeria = categoria not in ["Enviar receta", "Agendar paciente"]
+
+        try:
+            if guardar_en_fm:
+                await FileMakerService.create_recado(
+                    doctor_id=user.id,
+                    texto=texto_formateado,
+                    categoria=categoria,
+                    fecha=fecha,
+                    hora=hora,
+                )
+
+            if notificar_enfermeria:
+                settings = get_settings()
+                await WhatsAppService.send_template(
+                    settings.CHIEF_NURSE_PHONE,
+                    user.name,
+                    "reenviar_recado_secretaria",
+                    include_header=False,
+                    include_body=False,
+                    header_params=[categoria],
+                    body_params=[user.name, recado.texto_recado],
+                )
+
+            if guardar_en_fm and notificar_enfermeria:
+                confirmacion = "Se ha registrado en FileMaker y notificado a enfermería."
+            elif guardar_en_fm:
+                confirmacion = "Se ha registrado en FileMaker."
+            else:
+                confirmacion = "Se ha notificado a enfermería."
+
+            await WhatsAppService.send_message(
+                phone,
+                "*Recado procesado exitosamente*\n\n"
+                f"Categoría: {categoria}\n"
+                f"{fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
+                f"Recado: {recado.texto_recado}\n\n"
+                f"{confirmacion}"
+            )
+
+        except ServicioNoDisponibleError as e:
+            logger.error("Error al crear recado: %s", e)
+            await WhatsAppService.send_message(
+                phone,
+                "No se pudo registrar el recado. "
+                "Por favor intenta de nuevo en unos minutos."
+            )
+
+    async def _handle_recado_input(self, user, phone: str, message_text: str):
+        """Procesa el texto del recado cuando viene del flujo de botones."""
+        state_data = await workflow_state.get_data(phone)
+        categoria = state_data.get("categoria", "Otros") if state_data else "Otros"
+
+        await workflow_state.clear_state(phone)
+
+        tz = pytz.timezone("America/Santiago")
+        now = datetime.now(tz)
+        fecha = now.strftime("%m-%d-%Y")
+        hora = now.strftime("%H:%M:%S")
+        fecha_display = now.strftime("%d-%m-%Y")
+
         texto_formateado = f"{user.name} > {fecha_display} > {hora}\r{message_text}"
 
-        # Reglas por categoria:
-        # - Enviar receta:    solo FileMaker
-        # - Agendar paciente: solo FileMaker
-        # - Bloquear agenda:  solo notificar enfermeria
-        # - Otros:            FileMaker + notificar enfermeria
         guardar_en_fm = categoria != "Bloquear agenda"
         notificar_enfermeria = categoria not in ["Enviar receta", "Agendar paciente"]
 
@@ -222,7 +381,6 @@ class DoctorWorkflow(WorkflowHandler):
                     body_params=[user.name, message_text],
                 )
 
-            # Confirmacion al doctor
             if guardar_en_fm and notificar_enfermeria:
                 confirmacion = "Se ha registrado en FileMaker y notificado a enfermería."
             elif guardar_en_fm:
@@ -238,7 +396,10 @@ class DoctorWorkflow(WorkflowHandler):
                 f"Recado: {message_text}\n\n"
                 f"{confirmacion}"
             )
-            await self._ask_continue(phone)
+
+            # En modo legacy, preguntar si desea hacer algo mas
+            if not self._is_llm_enabled():
+                await self._ask_continue(phone)
 
         except ServicioNoDisponibleError as e:
             logger.error("Error al crear recado: %s", e)
@@ -249,7 +410,7 @@ class DoctorWorkflow(WorkflowHandler):
             )
 
     async def _ask_continue(self, phone: str):
-        """Pregunta al doctor si desea hacer algo mas"""
+        """Pregunta al doctor si desea hacer algo mas (solo modo legacy)."""
         await workflow_state.set_state(phone, "waiting_for_continue")
         await WhatsAppService.send_message(
             phone,
@@ -264,7 +425,9 @@ class DoctorWorkflow(WorkflowHandler):
             await WhatsAppService.send_message(phone, formatted_msg)
             if glossary:
                 await WhatsAppService.send_message(phone, glossary)
-            await self._ask_continue(phone)
+            # En modo legacy, preguntar si desea hacer algo mas
+            if not self._is_llm_enabled():
+                await self._ask_continue(phone)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar agenda: %s", e)
             await WhatsAppService.send_message(
@@ -291,7 +454,9 @@ class DoctorWorkflow(WorkflowHandler):
 
             formatted_msg = RecadosFormatter.format(recados_data, user.name, user.last_name, pacient_names)
             await WhatsAppService.send_message(phone, formatted_msg)
-            await self._ask_continue(phone)
+            # En modo legacy, preguntar si desea hacer algo mas
+            if not self._is_llm_enabled():
+                await self._ask_continue(phone)
         except ServicioNoDisponibleError as e:
             logger.error("Servicio no disponible al consultar recados: %s", e)
             await WhatsAppService.send_message(

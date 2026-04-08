@@ -3,6 +3,7 @@ Configuracion centralizada con validacion de tipos via pydantic-settings.
 Carga variables de entorno automaticamente, valida tipos y valores requeridos.
 """
 from functools import lru_cache
+from typing import Optional
 
 from pydantic_settings import BaseSettings
 from pydantic import Field
@@ -52,6 +53,12 @@ class Settings(BaseSettings):
 
     # --- Session ---
     SESSION_TIMEOUT_SECONDS: int = Field(default=120, description="Segundos de inactividad antes de cerrar la sesion automaticamente")
+
+    # --- OpenAI / LLM ---
+    LLM_ENABLED: bool = Field(default=True, description="Habilitar modo LLM (True) o modo estricto/legacy (False)")
+    OPENAI_API_KEY: Optional[str] = Field(default=None, description="API Key de OpenAI para el servicio de LLM (requerido si LLM_ENABLED=True)")
+    LLM_MODEL: str = Field(default="gpt-4o-mini", description="Modelo de OpenAI a utilizar")
+    LLM_MAX_HISTORY: int = Field(default=10, description="Cantidad maxima de mensajes de historial para contexto del LLM")
 
     @property
     def is_production(self) -> bool:
