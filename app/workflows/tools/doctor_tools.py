@@ -16,10 +16,11 @@ from pydantic import BaseModel, Field, field_validator
 
 class ConsultarAgenda(BaseModel):
     """
-    El médico quiere ver su agenda.
-    Usar para cualquier consulta de agenda: hoy, mañana, una fecha específica,
-    'la próxima semana', 'el lunes', '15 de abril', '05-04-26', etc.
-    Si el doctor no especifica fecha, se asume hoy (dejar fecha en None).
+    Usar SOLO cuando el doctor pide explícitamente ver su agenda o sus citas.
+    Ejemplos válidos: 'qué tengo hoy', 'mi agenda', 'tengo algo mañana',
+    'citas del lunes', 'agenda del 15 de abril', 'qué tengo esta semana'.
+    NO usar para saludos, preguntas generales ni conversación sin una solicitud
+    clara de ver agenda. Si hay duda, usar ResponderConversacion.
     """
     tipo: Literal["consultar_agenda"] = "consultar_agenda"
     fecha: Optional[str] = Field(
@@ -55,11 +56,12 @@ class ConsultarAgenda(BaseModel):
 
 class EnviarRecado(BaseModel):
     """
-    El médico quiere dejar un recado o mensaje.
-    Incluye: agendar paciente, enviar receta, bloquear agenda, u otro recado general.
-    Usar SOLO cuando el doctor ya indicó el contenido del recado en su mensaje.
-    Si solo dice 'quiero dejar un recado' sin dar el contenido, usar ResponderConversacion
-    para pedir los detalles antes de registrarlo.
+    Usar SOLO cuando el doctor quiere dejar un recado Y ya indicó el contenido
+    en su mensaje. Incluye: agendar paciente, enviar receta, bloquear agenda, u otro.
+    Ejemplos válidos: 'quiero agendar a Juan Pérez para mañana',
+    'bloquear el viernes por la tarde', 'enviar receta a paciente X'.
+    Si el doctor solo dice 'quiero dejar un recado' sin más detalle,
+    usar ResponderConversacion para pedir el contenido primero.
     """
     tipo: Literal["enviar_recado"] = "enviar_recado"
     categoria: Literal[
@@ -86,8 +88,8 @@ class EnviarRecado(BaseModel):
 
 class VerRecados(BaseModel):
     """
-    El médico quiere revisar sus recados pendientes/vigentes.
-    Usar cuando pide ver 'mis recados', 'tengo recados', 'mensajes pendientes', etc.
+    Usar cuando el doctor pide explícitamente ver sus recados o mensajes pendientes.
+    Ejemplos: 'mis recados', 'tengo recados?', 'mensajes pendientes', 'ver avisos'.
     """
     tipo: Literal["ver_recados"] = "ver_recados"
     mensaje_confirmacion: str = Field(
@@ -98,8 +100,10 @@ class VerRecados(BaseModel):
 
 class Despedirse(BaseModel):
     """
-    El médico quiere terminar la conversación.
-    Usar cuando dice 'chao', 'gracias', 'eso era todo', 'salir', 'adiós', etc.
+    Usar cuando el doctor indica claramente que termina la conversación.
+    Ejemplos: 'chao', 'hasta luego', 'adiós', 'eso era todo', 'listo gracias'.
+    No usar si solo dice 'gracias' en medio de una conversación activa —
+    en ese caso usar ResponderConversacion.
     """
     tipo: Literal["despedirse"] = "despedirse"
     mensaje_despedida: str = Field(
@@ -110,11 +114,12 @@ class Despedirse(BaseModel):
 
 class ResponderConversacion(BaseModel):
     """
-    Respuesta conversacional general. Usar cuando:
-    - El doctor saluda o hace una pregunta general sobre el sistema.
-    - Quiere dejar un recado pero no indicó el contenido (pedir detalles).
-    - No queda claro qué acción desea realizar.
-    Siempre incluir una sugerencia de las acciones disponibles.
+    DEFAULT: usar esta herramienta en cualquier caso que no encaje claramente
+    en las otras. Incluye saludos ('hola', 'buenos días'), preguntas generales
+    ('en qué me ayudas', 'qué puedes hacer'), agradecimientos en medio de
+    conversación, o cuando faltan datos para completar otra acción.
+    Siempre responder amablemente y ofrecer las opciones disponibles.
+    Ante la duda, SIEMPRE preferir esta herramienta sobre las demás.
     """
     tipo: Literal["responder_conversacion"] = "responder_conversacion"
     mensaje: str = Field(
