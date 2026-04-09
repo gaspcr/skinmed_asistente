@@ -30,7 +30,7 @@ from app.workflows.tools.doctor_tools import (
     VerRecados,
     Despedirse,
     ResponderConversacion,
-    DoctorToolUnion,
+    DoctorToolCall,
 )
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
@@ -94,13 +94,14 @@ class DoctorWorkflow(WorkflowHandler):
     async def _handle_text_llm(self, user, phone: str, message_text: str):
         """Procesa texto usando LLM + Function Calling."""
         try:
-            response = await llm_svc.classify_intent(
+            result = await llm_svc.classify_intent(
                 phone=phone,
                 message=message_text,
                 user_name=f"{user.name} {user.last_name}".strip(),
                 user_role="médico",
-                response_model=DoctorToolUnion,
+                response_model=DoctorToolCall,
             )
+            response = result.accion
         except Exception as e:
             log_llm_fallback(phone, str(e))
             await WhatsAppService.send_message(

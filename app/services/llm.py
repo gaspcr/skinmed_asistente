@@ -183,9 +183,12 @@ async def classify_intent(
             max_messages=settings.LLM_MAX_HISTORY,
         )
 
+        # El wrapper DoctorToolCall tiene .accion con la tool real
+        accion = getattr(response, "accion", response)
+
         # Guardar en historial: respuesta resumida del asistente
         # (guardamos el tipo de accion para contexto, no el JSON completo)
-        assistant_summary = _summarize_response(response)
+        assistant_summary = _summarize_response(accion)
         await redis_svc.push_history(
             phone, "assistant", assistant_summary,
             max_messages=settings.LLM_MAX_HISTORY,
@@ -193,7 +196,7 @@ async def classify_intent(
 
         logger.info(
             "[LLM] Clasificacion para %s: %s",
-            phone, type(response).__name__,
+            phone, type(accion).__name__,
         )
         return response
 

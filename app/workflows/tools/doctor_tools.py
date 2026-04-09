@@ -125,16 +125,20 @@ class ResponderConversacion(BaseModel):
     )
 
 
-# Union discriminado por el campo `tipo`.
-# Pydantic e Instructor usan el valor de `tipo` para resolver la instancia
-# correcta sin ambigüedad en el function calling.
-DoctorToolUnion = Annotated[
-    Union[
-        ConsultarAgenda,
-        EnviarRecado,
-        VerRecados,
-        Despedirse,
-        ResponderConversacion,
-    ],
-    Field(discriminator="tipo"),
-]
+class DoctorToolCall(BaseModel):
+    """
+    Wrapper concreto que contiene la acción elegida por la IA.
+    Pasar esta clase como response_model a Instructor evita que cree su
+    propio wrapper interno Response(content=...) alrededor de Unions.
+    Acceder al resultado via response.accion.
+    """
+    accion: Annotated[
+        Union[
+            ConsultarAgenda,
+            EnviarRecado,
+            VerRecados,
+            Despedirse,
+            ResponderConversacion,
+        ],
+        Field(discriminator="tipo"),
+    ]
