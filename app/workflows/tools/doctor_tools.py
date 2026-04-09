@@ -3,42 +3,37 @@ Herramientas (tools) Pydantic para el flujo del médico.
 
 Cada clase representa una accion que la IA puede invocar.
 Instructor forzara al LLM a devolver exactamente una de estas clases,
-con los campos validados por Pydantic, eliminando la necesidad de
-regex o parsing manual.
+con los campos validados por Pydantic.
 """
 import re
 from typing import Literal, Optional
 from pydantic import BaseModel, Field, field_validator
 
 
-class ConsultarAgendaHoy(BaseModel):
+class ConsultarAgenda(BaseModel):
     """
-    El médico quiere ver su agenda del día de hoy.
-    Usar cuando el doctor pide ver 'mi agenda', 'mis citas de hoy',
-    'qué tengo hoy', o similar sin especificar otra fecha.
+    El médico quiere ver su agenda.
+    Usar para cualquier consulta de agenda: hoy, mañana, una fecha específica,
+    'la próxima semana', 'el lunes', '15 de abril', '05-04-26', etc.
+    Si el doctor no especifica fecha, se asume hoy (dejar fecha en None).
     """
-    mensaje_confirmacion: str = Field(
-        description="Mensaje breve confirmando que se buscará su agenda de hoy. "
-        "Ejemplo: 'Buscando tu agenda de hoy...'"
+    fecha: Optional[str] = Field(
+        default=None,
+        description="Fecha a consultar en formato MM-DD-YYYY (mes-día-año). "
+        "Dejar en null/None si el doctor quiere ver la agenda de HOY. "
+        "Si menciona cualquier otra fecha (mañana, el lunes, 15 de abril, etc.), "
+        "convertirla siempre a MM-DD-YYYY. Ejemplo: 15 de abril de 2026 → 04-15-2026."
     )
-
-
-class ConsultarAgendaOtraFecha(BaseModel):
-    """
-    El médico quiere ver su agenda de un día específico distinto a hoy.
-    Usar cuando menciona una fecha concreta como 'mañana', 'el lunes',
-    'el 15 de abril', '05-04-26', 'la próxima semana', etc.
-    """
-    fecha: str = Field(
-        description="La fecha extraída en formato MM-DD-YYYY (mes-día-año). "
-        "IMPORTANTE: el doctor puede escribir la fecha en cualquier formato "
-        "(dd-mm-yy, 'mañana', 'el lunes', '15 de abril'), pero SIEMPRE debes "
-        "convertirla a MM-DD-YYYY. Ejemplo: 15 de abril de 2026 → 04-15-2026."
+    mensaje_confirmacion: str = Field(
+        description="Mensaje breve confirmando la consulta. "
+        "Ejemplos: 'Buscando tu agenda de hoy...' / 'Buscando tu agenda para el 15 de abril...'"
     )
 
     @field_validator("fecha")
     @classmethod
-    def validar_formato_fecha(cls, v: str) -> str:
+    def validar_formato_fecha(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         if not re.match(r"^\d{2}-\d{2}-\d{4}$", v):
             raise ValueError(
                 f"Formato de fecha inválido: '{v}'. "
@@ -51,11 +46,6 @@ class ConsultarAgendaOtraFecha(BaseModel):
                 "El mes debe ser 01-12 y el día 01-31."
             )
         return v
-
-    mensaje_confirmacion: str = Field(
-        description="Mensaje breve confirmando la fecha consultada. "
-        "Ejemplo: 'Buscando tu agenda para el 15 de abril...'"
-    )
 
 
 class EnviarRecado(BaseModel):

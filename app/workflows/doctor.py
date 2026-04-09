@@ -26,8 +26,7 @@ from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
 from app.workflows import session_timer
 from app.workflows.tools.doctor_tools import (
-    ConsultarAgendaHoy,
-    ConsultarAgendaOtraFecha,
+    ConsultarAgenda,
     EnviarRecado,
     VerRecados,
     Despedirse,
@@ -46,8 +45,7 @@ logger = logging.getLogger(__name__)
 
 # Union type de todas las herramientas disponibles para el médico
 DoctorToolUnion = Union[
-    ConsultarAgendaHoy,
-    ConsultarAgendaOtraFecha,
+    ConsultarAgenda,
     EnviarRecado,
     VerRecados,
     Despedirse,
@@ -123,13 +121,9 @@ class DoctorWorkflow(WorkflowHandler):
             return
 
         # Ejecutar la acción según la herramienta elegida por la IA
-        if isinstance(response, ConsultarAgendaHoy):
-            log_action_taken(phone, "llm", "ConsultarAgendaHoy")
-            await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
-            await self._send_agenda(user, phone, None)
-
-        elif isinstance(response, ConsultarAgendaOtraFecha):
-            log_action_taken(phone, "llm", "ConsultarAgendaOtraFecha", details=response.fecha)
+        if isinstance(response, ConsultarAgenda):
+            details = response.fecha or "hoy"
+            log_action_taken(phone, "llm", "ConsultarAgenda", details=details)
             await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
             await self._send_agenda(user, phone, response.fecha)
 
