@@ -14,7 +14,6 @@ Los botones de WhatsApp funcionan igual en ambos modos.
 import logging
 import re
 from datetime import datetime
-from typing import Union
 
 import pytz
 from fastapi import BackgroundTasks
@@ -31,6 +30,7 @@ from app.workflows.tools.doctor_tools import (
     VerRecados,
     Despedirse,
     ResponderConversacion,
+    DoctorToolUnion,
 )
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
@@ -42,15 +42,6 @@ from app.exceptions import ServicioNoDisponibleError
 from app.utils.activity_log import log_action_taken, log_llm_fallback
 
 logger = logging.getLogger(__name__)
-
-# Union type de todas las herramientas disponibles para el médico
-DoctorToolUnion = Union[
-    ConsultarAgenda,
-    EnviarRecado,
-    VerRecados,
-    Despedirse,
-    ResponderConversacion,
-]
 
 
 @register_workflow("medico")
