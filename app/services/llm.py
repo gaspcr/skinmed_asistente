@@ -10,6 +10,7 @@ import logging
 from datetime import datetime
 from typing import Union, Type
 
+import httpx
 import instructor
 from openai import AsyncOpenAI
 
@@ -29,26 +30,23 @@ def _get_client() -> instructor.AsyncInstructor:
     global _client
     if _client is None:
         settings = get_settings()
-        openai_client = AsyncOpenAI(api_key=settings.OPENAI_API_KEY)
+        openai_client = AsyncOpenAI(
+            api_key=settings.OPENAI_API_KEY,
+            timeout=httpx.Timeout(30.0, connect=10.0),
+        )
         _client = instructor.from_openai(openai_client)
         logger.info("Cliente Instructor/OpenAI inicializado")
     return _client
 
 
-def _build_system_prompt(user_name: str, user_role: str) -> str:
-    """
-    Construye el system prompt del agente para un rol especifico.
-
-    El prompt define la personalidad, las reglas y el contexto temporal
-    que el LLM usará para decidir qué herramienta invocar.
-    """
+def _get_datetime_context() -> tuple[str, str, str]:
+    """Obtiene fecha, día de la semana y hora actual en español (Chile)."""
     tz = pytz.timezone("America/Santiago")
     now = datetime.now(tz)
     fecha_hoy = now.strftime("%d de %B de %Y")
     dia_semana = now.strftime("%A")
     hora_actual = now.strftime("%H:%M")
 
-    # Mapeo de días y meses al español
     dias_map = {
         "Monday": "lunes", "Tuesday": "martes", "Wednesday": "miércoles",
         "Thursday": "jueves", "Friday": "viernes", "Saturday": "sábado",
@@ -65,19 +63,19 @@ def _build_system_prompt(user_name: str, user_role: str) -> str:
         fecha_hoy = fecha_hoy.replace(en, es)
     dia_semana = dias_map.get(dia_semana, dia_semana)
 
-    return f"""Eres el asistente virtual de la Clínica SkinMed por WhatsApp.
-Estás hablando con el/la Dr(a). {user_name}, quien es {user_role} de la clínica.
+    return fecha_hoy, dia_semana, hora_actual
 
-FECHA Y HORA ACTUAL:
-- Hoy es {dia_semana}, {fecha_hoy}
-- Hora actual: {hora_actual} (hora de Chile)
+
+# Instrucciones específicas por rol
+_ROLE_INSTRUCTIONS: dict[str, str] = {
+    "medico": """Estás hablando con el/la Dr(a). {user_name}, quien es médico de la clínica.
 
 TU COMPORTAMIENTO:
-- Responde siempre en español chileno, de forma profesional pero cercana.
+- Responde siempre en español neutro, de forma profesional pero cercana.
 - Sé conciso: las respuestas se envían por WhatsApp y deben ser breves.
 - Cuando el doctor pida ver su agenda sin especificar fecha, usa la herramienta de agenda de hoy.
 - Cuando mencione una fecha (mañana, lunes, 15 de abril, etc.), calcula la fecha exacta usando la fecha actual como referencia y usa la herramienta de agenda otra fecha.
-- El formato de fecha para el sistema es MM-DD-YYYY (mes-día-año).
+- El formato de fecha para el sistema es MM-DD-YYYY (mes-día-año). El doctor puede escribir fechas en cualquier formato (dd-mm-yy, texto, etc.), tú SIEMPRE debes convertirlas a MM-DD-YYYY.
 - Si el doctor quiere dejar un recado, identifica la categoría correcta y copia su mensaje textualmente.
 - Si el doctor solo saluda o hace una pregunta general, responde amablemente y ofrece las opciones disponibles.
 - NUNCA inventes datos médicos, agendas o información de pacientes.
@@ -88,7 +86,50 @@ ACCIONES DISPONIBLES:
 3. Enviar recado (agendar paciente, enviar receta, bloquear agenda, u otro)
 4. Ver recados pendientes
 5. Despedirse / terminar la conversación
-6. Responder de forma conversacional (saludos, dudas, etc.)"""
+6. Responder de forma conversacional (saludos, dudas, etc.)""",
+
+    "gerencia": """Estás hablando con {user_name}, quien es parte de la gerencia de la clínica.
+
+TU COMPORTAMIENTO:
+- Responde siempre en español neutro, de forma profesional pero cercana.
+- Sé conciso: las respuestas se envían por WhatsApp y deben ser breves.
+- Cuando pida ver agendas sin especificar fecha, usa la herramienta de agenda de hoy.
+- Cuando mencione una fecha, calcula la fecha exacta usando la fecha actual como referencia.
+- El formato de fecha para el sistema es MM-DD-YYYY (mes-día-año). El usuario puede escribir fechas en cualquier formato, tú SIEMPRE debes convertirlas a MM-DD-YYYY.
+- Si solo saluda o hace una pregunta general, responde amablemente y ofrece las opciones disponibles.
+- NUNCA inventes datos médicos, agendas o información de pacientes.""",
+}
+
+
+def _build_system_prompt(user_name: str, user_role: str) -> str:
+    """
+    Construye el system prompt del agente para un rol específico.
+
+    Usa instrucciones específicas por rol si existen, o genera
+    un prompt genérico como fallback.
+    """
+    fecha_hoy, dia_semana, hora_actual = _get_datetime_context()
+
+    role_key = user_role.lower()
+    role_instructions = _ROLE_INSTRUCTIONS.get(role_key)
+
+    if role_instructions:
+        role_block = role_instructions.format(user_name=user_name)
+    else:
+        role_block = f"""Estás hablando con {user_name}, quien tiene el rol de {user_role} en la clínica.
+
+TU COMPORTAMIENTO:
+- Responde siempre en español neutro, de forma profesional pero cercana.
+- Sé conciso: las respuestas se envían por WhatsApp y deben ser breves.
+- NUNCA inventes datos médicos, agendas o información de pacientes.
+- Si no queda claro qué quiere, ofrece las opciones disponibles."""
+
+    return f"""Eres el asistente virtual de la Clínica SkinMed por WhatsApp.
+{role_block}
+
+FECHA Y HORA ACTUAL:
+- Hoy es {dia_semana}, {fecha_hoy}
+- Hora actual: {hora_actual} (hora de Chile)"""
 
 
 async def classify_intent(
@@ -162,18 +203,30 @@ async def classify_intent(
         raise
 
 
+# Campos de resumen por nombre de clase.
+# Orden de prioridad para buscar el campo que resume la respuesta.
+_SUMMARY_FIELDS: dict[str, list[str]] = {
+    "ConsultarAgendaHoy": ["mensaje_confirmacion"],
+    "ConsultarAgendaOtraFecha": ["mensaje_confirmacion"],
+    "EnviarRecado": ["mensaje_confirmacion"],
+    "VerRecados": ["mensaje_confirmacion"],
+    "Despedirse": ["mensaje_despedida"],
+    "ResponderConversacion": ["mensaje"],
+}
+
+
 def _summarize_response(response: object) -> str:
     """
     Genera un resumen legible de la respuesta del LLM para guardar en el historial.
     Esto ayuda al modelo a recordar qué hizo en turnos anteriores.
     """
     class_name = type(response).__name__
+    fields = _SUMMARY_FIELDS.get(class_name)
 
-    if hasattr(response, "mensaje_confirmacion"):
-        return response.mensaje_confirmacion
-    elif hasattr(response, "mensaje_despedida"):
-        return response.mensaje_despedida
-    elif hasattr(response, "mensaje"):
-        return response.mensaje
-    else:
-        return f"[Acción: {class_name}]"
+    if fields:
+        for field in fields:
+            value = getattr(response, field, None)
+            if value:
+                return value
+
+    return f"[Acción: {class_name}]"

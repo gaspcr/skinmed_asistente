@@ -40,6 +40,7 @@ from app.services import redis as redis_svc
 from app.formatters.agenda import AgendaFormatter
 from app.formatters.recados import RecadosFormatter
 from app.exceptions import ServicioNoDisponibleError
+from app.utils.activity_log import log_action_taken, log_llm_fallback
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +72,7 @@ class DoctorWorkflow(WorkflowHandler):
 
         # "salir" siempre funciona igual en ambos modos
         if texto == "salir":
+            log_action_taken(phone, "state", "salir")
             await workflow_state.clear_state(phone)
             await session_timer.cancel(phone)
             if self._is_llm_enabled():
@@ -81,10 +83,13 @@ class DoctorWorkflow(WorkflowHandler):
             )
             return
 
-        # Flujo multi-paso pendiente del recado (compartido entre ambos modos)
+        # Flujos multi-paso pendientes (compartidos entre ambos modos)
         step = await workflow_state.get_step(phone)
         if step == "waiting_for_recado":
             await self._handle_recado_input(user, phone, message_text)
+            return
+        if step == "waiting_for_date":
+            await self._handle_date_input(user, phone, message_text)
             return
 
         # Delegar según modo
@@ -108,34 +113,45 @@ class DoctorWorkflow(WorkflowHandler):
                 response_model=DoctorToolUnion,
             )
         except Exception as e:
-            logger.error("Error LLM para %s, usando fallback menu: %s", phone, e)
+            log_llm_fallback(phone, str(e))
+            await WhatsAppService.send_message(
+                phone,
+                "No pude procesar tu mensaje en este momento. "
+                "Te muestro las opciones disponibles:"
+            )
             await self._send_menu(user, phone)
             return
 
         # Ejecutar la acción según la herramienta elegida por la IA
         if isinstance(response, ConsultarAgendaHoy):
+            log_action_taken(phone, "llm", "ConsultarAgendaHoy")
             await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
             await self._send_agenda(user, phone, None)
 
         elif isinstance(response, ConsultarAgendaOtraFecha):
+            log_action_taken(phone, "llm", "ConsultarAgendaOtraFecha", details=response.fecha)
             await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
             await self._send_agenda(user, phone, response.fecha)
 
         elif isinstance(response, EnviarRecado):
+            log_action_taken(phone, "llm", "EnviarRecado", details=response.categoria)
             await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
             await self._process_recado(user, phone, response)
 
         elif isinstance(response, VerRecados):
+            log_action_taken(phone, "llm", "VerRecados")
             await WhatsAppService.send_message(phone, response.mensaje_confirmacion)
             await self._send_recados(user, phone)
 
         elif isinstance(response, Despedirse):
+            log_action_taken(phone, "llm", "Despedirse")
             await workflow_state.clear_state(phone)
             await session_timer.cancel(phone)
             await redis_svc.clear_history(phone)
             await WhatsAppService.send_message(phone, response.mensaje_despedida)
 
         elif isinstance(response, ResponderConversacion):
+            log_action_taken(phone, "llm", "ResponderConversacion")
             await WhatsAppService.send_message(phone, response.mensaje)
 
     # =========================================================================
@@ -148,6 +164,7 @@ class DoctorWorkflow(WorkflowHandler):
 
         # Comando global: menu
         if texto == "menu":
+            log_action_taken(phone, "legacy", "menu")
             await workflow_state.clear_state(phone)
             await self._send_menu(user, phone)
             return
@@ -159,9 +176,11 @@ class DoctorWorkflow(WorkflowHandler):
                 return
             elif step == "waiting_for_continue":
                 if texto in ["si", "sí", "s"]:
+                    log_action_taken(phone, "legacy", "continuar:si")
                     await workflow_state.clear_state(phone)
                     await self._send_menu(user, phone)
                 elif texto in ["no", "n"]:
+                    log_action_taken(phone, "legacy", "continuar:no")
                     await workflow_state.clear_state(phone)
                     await session_timer.cancel(phone)
                     await WhatsAppService.send_message(
@@ -171,6 +190,7 @@ class DoctorWorkflow(WorkflowHandler):
                 return
 
         # Default: enviar plantilla inicial + mensaje de ayuda
+        log_action_taken(phone, "legacy", "menu:inicial")
         await self._send_menu(user, phone)
         await WhatsAppService.send_message(
             phone,
@@ -196,6 +216,7 @@ class DoctorWorkflow(WorkflowHandler):
             date_obj = datetime.strptime(f"{day}-{month}-{full_year}", "%d-%m-%Y")
             filemaker_date = date_obj.strftime("%m-%d-%Y")
 
+            log_action_taken(phone, "legacy", "ConsultarAgendaOtraFecha", details=filemaker_date)
             await workflow_state.clear_state(phone)
             await self._send_agenda(user, phone, filemaker_date)
 
@@ -223,11 +244,17 @@ class DoctorWorkflow(WorkflowHandler):
         """
         logger.debug("Boton recibido: '%s'", button_title)
 
+        # Registrar la interacción del botón en el historial LLM
+        if self._is_llm_enabled():
+            await redis_svc.push_history(phone, "user", f"[Botón: {button_title}]")
+
         # Botones de plantilla inicial (respuesta_inicial_doctores_uso_interno)
         if button_title == "Revisar agenda del día":
+            log_action_taken(phone, "button", "ConsultarAgendaHoy")
             background_tasks.add_task(self._send_agenda, user, phone, None)
 
         elif button_title == "Revisar agenda otro día":
+            log_action_taken(phone, "button", "ConsultarAgendaOtraFecha:esperando_fecha")
             await workflow_state.set_state(phone, "waiting_for_date")
             await WhatsAppService.send_message(
                 phone,
@@ -235,14 +262,16 @@ class DoctorWorkflow(WorkflowHandler):
             )
 
         elif button_title == "Enviar recado":
-            logger.debug("Enviando plantilla recados por boton: '%s'", button_title)
+            log_action_taken(phone, "button", "EnviarRecado:menu")
             await WhatsAppService.send_template(phone, f'{user.name} {user.last_name}', "sistema_recados", include_header=False, include_body=True)
 
         elif button_title == "Revisar mis recados":
+            log_action_taken(phone, "button", "VerRecados")
             background_tasks.add_task(self._send_recados, user, phone)
 
         # Botones de plantilla recados (recados_de_doctores)
         elif button_title == "Agendar Paciente":
+            log_action_taken(phone, "button", "EnviarRecado:esperando_texto", details="Agendar paciente")
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Agendar paciente"})
             await WhatsAppService.send_template(
                 phone, f'{user.name} {user.last_name}', "agendar_paciente_doctores",
@@ -250,6 +279,7 @@ class DoctorWorkflow(WorkflowHandler):
             )
 
         elif button_title == "Otro (varios)":
+            log_action_taken(phone, "button", "EnviarRecado:esperando_texto", details="Otros")
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Otros"})
             await WhatsAppService.send_message(
                 phone,
@@ -260,6 +290,7 @@ class DoctorWorkflow(WorkflowHandler):
             )
 
         elif button_title == "Bloquear Agenda":
+            log_action_taken(phone, "button", "EnviarRecado:esperando_texto", details="Bloquear agenda")
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Bloquear agenda"})
             await WhatsAppService.send_template(
                 phone, f'{user.name} {user.last_name}', "bloquear_agenda_dia_doctores",
@@ -267,6 +298,7 @@ class DoctorWorkflow(WorkflowHandler):
             )
 
         elif button_title == "Enviar Recetas":
+            log_action_taken(phone, "button", "EnviarRecado:esperando_texto", details="Enviar receta")
             await workflow_state.set_state(phone, "waiting_for_recado", data={"categoria": "Enviar receta"})
             await WhatsAppService.send_template(
                 phone, f'{user.name} {user.last_name}', "enviar_receta_doctores",
@@ -283,78 +315,25 @@ class DoctorWorkflow(WorkflowHandler):
 
     async def _process_recado(self, user, phone: str, recado: EnviarRecado):
         """Procesa un recado detectado directamente por la IA (sin flujo de botones)."""
-        tz = pytz.timezone("America/Santiago")
-        now = datetime.now(tz)
-        fecha = now.strftime("%m-%d-%Y")
-        hora = now.strftime("%H:%M:%S")
-        fecha_display = now.strftime("%d-%m-%Y")
-
-        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r{recado.texto_recado}"
-
-        categoria = recado.categoria
-        guardar_en_fm = categoria != "Bloquear agenda"
-        notificar_enfermeria = categoria not in ["Enviar receta", "Agendar paciente"]
-
-        try:
-            if guardar_en_fm:
-                await FileMakerService.create_recado(
-                    doctor_id=user.id,
-                    texto=texto_formateado,
-                    categoria=categoria,
-                    fecha=fecha,
-                    hora=hora,
-                )
-
-            if notificar_enfermeria:
-                settings = get_settings()
-                await WhatsAppService.send_template(
-                    settings.CHIEF_NURSE_PHONE,
-                    user.name,
-                    "reenviar_recado_secretaria",
-                    include_header=False,
-                    include_body=False,
-                    header_params=[categoria],
-                    body_params=[user.name, recado.texto_recado],
-                )
-
-            if guardar_en_fm and notificar_enfermeria:
-                confirmacion = "Se ha registrado en FileMaker y notificado a enfermería."
-            elif guardar_en_fm:
-                confirmacion = "Se ha registrado en FileMaker."
-            else:
-                confirmacion = "Se ha notificado a enfermería."
-
-            await WhatsAppService.send_message(
-                phone,
-                "*Recado procesado exitosamente*\n\n"
-                f"Categoría: {categoria}\n"
-                f"{fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
-                f"Recado: {recado.texto_recado}\n\n"
-                f"{confirmacion}"
-            )
-
-        except ServicioNoDisponibleError as e:
-            logger.error("Error al crear recado: %s", e)
-            await WhatsAppService.send_message(
-                phone,
-                "No se pudo registrar el recado. "
-                "Por favor intenta de nuevo en unos minutos."
-            )
+        await self._execute_recado(user, phone, recado.categoria, recado.texto_recado)
 
     async def _handle_recado_input(self, user, phone: str, message_text: str):
         """Procesa el texto del recado cuando viene del flujo de botones."""
         state_data = await workflow_state.get_data(phone)
         categoria = state_data.get("categoria", "Otros") if state_data else "Otros"
-
+        log_action_taken(phone, "state", "EnviarRecado:texto_recibido", details=categoria)
         await workflow_state.clear_state(phone)
+        await self._execute_recado(user, phone, categoria, message_text)
 
+    async def _execute_recado(self, user, phone: str, categoria: str, texto: str):
+        """Lógica compartida para procesar un recado (LLM y botones)."""
         tz = pytz.timezone("America/Santiago")
         now = datetime.now(tz)
         fecha = now.strftime("%m-%d-%Y")
         hora = now.strftime("%H:%M:%S")
         fecha_display = now.strftime("%d-%m-%Y")
 
-        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r{message_text}"
+        texto_formateado = f"{user.name} > {fecha_display} > {hora}\r{texto}"
 
         guardar_en_fm = categoria != "Bloquear agenda"
         notificar_enfermeria = categoria not in ["Enviar receta", "Agendar paciente"]
@@ -378,7 +357,7 @@ class DoctorWorkflow(WorkflowHandler):
                     include_header=False,
                     include_body=False,
                     header_params=[categoria],
-                    body_params=[user.name, message_text],
+                    body_params=[user.name, texto],
                 )
 
             if guardar_en_fm and notificar_enfermeria:
@@ -393,7 +372,7 @@ class DoctorWorkflow(WorkflowHandler):
                 "*Recado procesado exitosamente*\n\n"
                 f"Categoría: {categoria}\n"
                 f"{fecha_display} — {':'.join(hora.split(':')[:2])}\n\n"
-                f"Recado: {message_text}\n\n"
+                f"Recado: {texto}\n\n"
                 f"{confirmacion}"
             )
 

@@ -16,6 +16,11 @@ from app.exceptions import ServicioNoDisponibleError
 from app.workflows import doctor, manager, nurse, hybrid
 from app.workflows.role_registry import get_workflow_handler
 from app.workflows import session_timer
+from app.utils.activity_log import (
+    log_user_session,
+    log_message_received,
+    log_action_taken,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -155,26 +160,25 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
         # Autenticacion
         user = await AuthService.get_user_by_phone(sender_phone)
         if not user:
-            logger.warning("[MAIN] Usuario no encontrado para phone=%s", sender_phone)
+            logger.warning("Usuario no encontrado: phone=%s", sender_phone)
             return
 
-        logger.info("[MAIN] Usuario autenticado: phone=%s, role=%s, name=%s", sender_phone, user.role, user.name)
+        full_name = f"{user.name} {user.last_name}".strip()
+        log_user_session(sender_phone, full_name, user.role)
 
         # Verificar handler del rol
         handler = get_workflow_handler(user.role)
         if not handler:
-            logger.error("[MAIN] No hay handler para rol='%s' de phone=%s", user.role, sender_phone)
+            logger.error("Sin handler para rol='%s' phone=%s", user.role, sender_phone)
             await WhatsAppService.send_message(
                 sender_phone,
                 f"Lo siento, tu rol '{user.role}' no está configurado en el sistema."
             )
             return
 
-        logger.info("[MAIN] Handler resuelto: %s para phone=%s", type(handler).__name__, sender_phone)
-
         # Manejo de tipos de mensaje no soportados
         if msg.type not in TIPOS_MENSAJE_SOPORTADOS:
-            logger.info("[MAIN] Tipo de mensaje no soportado: '%s' de phone=%s", msg.type, sender_phone)
+            log_message_received(sender_phone, msg.type, "[tipo no soportado]")
             await WhatsAppService.send_message(
                 sender_phone,
                 "Lo siento, este tipo de mensaje no es soportado. "
@@ -189,22 +193,18 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
         # Procesar segun tipo
         if msg.type == "text":
             message_text = msg.text.body if msg.text and hasattr(msg.text, 'body') else ""
-            logger.info("[MAIN] Mensaje de texto recibido de %s: '%s'", sender_phone, message_text[:50])
 
             # Sanitizar: limitar longitud
             if len(message_text) > settings.MAX_MESSAGE_LENGTH:
                 message_text = message_text[:settings.MAX_MESSAGE_LENGTH]
-                logger.info(
-                    "Mensaje truncado para %s (largo original > %d)",
-                    sender_phone,
-                    settings.MAX_MESSAGE_LENGTH,
-                )
+                logger.info("Mensaje truncado para %s (largo > %d)", sender_phone, settings.MAX_MESSAGE_LENGTH)
 
+            log_message_received(sender_phone, "text", message_text)
             await handler.handle_text(user, sender_phone, message_text)
 
         elif msg.type in ["interactive", "button"]:
             btn_title = extract_button_title(msg)
-            logger.info("[MAIN] Boton recibido de %s: '%s'", sender_phone, btn_title)
+            log_message_received(sender_phone, "button", btn_title)
             await handler.handle_button(user, sender_phone, btn_title, background_tasks)
 
     except ServicioNoDisponibleError as e:

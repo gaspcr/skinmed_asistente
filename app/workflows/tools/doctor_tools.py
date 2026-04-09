@@ -6,8 +6,9 @@ Instructor forzara al LLM a devolver exactamente una de estas clases,
 con los campos validados por Pydantic, eliminando la necesidad de
 regex o parsing manual.
 """
+import re
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ConsultarAgendaHoy(BaseModel):
@@ -29,10 +30,28 @@ class ConsultarAgendaOtraFecha(BaseModel):
     'el 15 de abril', '05-04-26', 'la próxima semana', etc.
     """
     fecha: str = Field(
-        description="La fecha extraída en formato MM-DD-YYYY (formato gringo). "
-        "Si el doctor dice 'mañana', calcular la fecha real. "
-        "Si dice 'el lunes' sin mes, asumir el lunes más próximo."
+        description="La fecha extraída en formato MM-DD-YYYY (mes-día-año). "
+        "IMPORTANTE: el doctor puede escribir la fecha en cualquier formato "
+        "(dd-mm-yy, 'mañana', 'el lunes', '15 de abril'), pero SIEMPRE debes "
+        "convertirla a MM-DD-YYYY. Ejemplo: 15 de abril de 2026 → 04-15-2026."
     )
+
+    @field_validator("fecha")
+    @classmethod
+    def validar_formato_fecha(cls, v: str) -> str:
+        if not re.match(r"^\d{2}-\d{2}-\d{4}$", v):
+            raise ValueError(
+                f"Formato de fecha inválido: '{v}'. "
+                "Debe ser MM-DD-YYYY (mes-día-año). Ejemplo: 04-15-2026."
+            )
+        month, day, year = v.split("-")
+        if not (1 <= int(month) <= 12 and 1 <= int(day) <= 31):
+            raise ValueError(
+                f"Fecha fuera de rango: mes={month}, día={day}. "
+                "El mes debe ser 01-12 y el día 01-31."
+            )
+        return v
+
     mensaje_confirmacion: str = Field(
         description="Mensaje breve confirmando la fecha consultada. "
         "Ejemplo: 'Buscando tu agenda para el 15 de abril...'"
@@ -53,8 +72,7 @@ class EnviarRecado(BaseModel):
         description="Categoría del recado. Elegir según el contenido: "
         "'Agendar paciente' si quiere agendar a alguien, "
         "'Enviar receta' si quiere enviar una receta, "
-        "'Bloquear agenda' si quiere bloquear horarios, "
-        "'Otros' para todo lo demás."
+        "'Bloquear agenda' si quiere bloquear horarios o días, "
     )
     texto_recado: str = Field(
         description="El contenido tal cual del recado del doctor, "
