@@ -139,7 +139,7 @@ TOOLS = [
                 "properties": {
                     "fecha": {
                         "type": "string",
-                        "description": "Fecha en formato dd-mm-yy (ejemplo: 05-02-26). Si no se indica, se usa la fecha de hoy.",
+                        "description": "Fecha en formato ISO YYYY-MM-DD (ejemplo: 2026-04-15 para el 15 de abril de 2026). Si no se indica, se usa la fecha de hoy.",
                     }
                 },
                 "required": [],
@@ -227,18 +227,23 @@ async def _tool_revisar_agenda(user, arguments: Dict[str, Any]) -> str:
     filemaker_date = None
 
     if fecha_input:
-        # Parsear dd-mm-yy a mm-dd-yyyy para FileMaker
+        # El LLM envía YYYY-MM-DD (ISO), convertir a mm-dd-yyyy para FileMaker
         try:
-            parts = fecha_input.strip().split("-")
-            if len(parts) == 3:
-                day, month, year = parts
-                full_year = f"20{year}" if len(year) == 2 else year
-                date_obj = datetime.strptime(f"{day}-{month}-{full_year}", "%d-%m-%Y")
-                filemaker_date = date_obj.strftime("%m-%d-%Y")
-            else:
-                return "Formato de fecha inválido. Usa dd-mm-yy (ejemplo: 05-02-26)."
+            date_obj = datetime.strptime(fecha_input.strip(), "%Y-%m-%d")
+            filemaker_date = date_obj.strftime("%m-%d-%Y")
         except ValueError:
-            return "Fecha inválida. Verifica que el día y mes sean correctos."
+            # Fallback: intentar parsear dd-mm-yy por si el LLM usa ese formato
+            try:
+                parts = fecha_input.strip().split("-")
+                if len(parts) == 3:
+                    day, month, year = parts
+                    full_year = f"20{year}" if len(year) == 2 else year
+                    date_obj = datetime.strptime(f"{day}-{month}-{full_year}", "%d-%m-%Y")
+                    filemaker_date = date_obj.strftime("%m-%d-%Y")
+                else:
+                    return "Formato de fecha inválido."
+            except ValueError:
+                return "Fecha inválida. Verifica que el día y mes sean correctos."
 
     agenda_data = await FileMakerService.get_agenda_raw(user.id, filemaker_date)
     formatted_msg, glossary = AgendaFormatter.format(agenda_data, user.name)
