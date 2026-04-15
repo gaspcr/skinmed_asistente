@@ -6,6 +6,7 @@ import pytz
 from fastapi import BackgroundTasks
 
 from app.config import get_settings
+from app.workflows import llm_agent
 
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
@@ -30,12 +31,14 @@ class DoctorWorkflow(WorkflowHandler):
         if texto == "menu":
             logger.info("[DOCTOR] Comando 'menu' recibido de %s", phone)
             await workflow_state.clear_state(phone)
+            await llm_agent.clear_llm_state(phone)
             await self._send_menu(user, phone)
             return
 
         if texto == "salir":
             logger.info("[DOCTOR] Comando 'salir' recibido de %s", phone)
             await workflow_state.clear_state(phone)
+            await llm_agent.clear_llm_state(phone)
             await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
@@ -43,6 +46,20 @@ class DoctorWorkflow(WorkflowHandler):
             )
             return
 
+        # ── LLM Mode ──
+        # Si LLM está habilitado y la sesión no está en fallback, procesar con LLM
+        settings = get_settings()
+        if settings.LLM_MODE_ENABLED and not await llm_agent.is_legacy_fallback(phone):
+            logger.info("[DOCTOR] Procesando con LLM para %s", phone)
+            result = await llm_agent.process_message(user, phone, message_text)
+            if result == "FALLBACK":
+                logger.info("[DOCTOR] LLM señaló fallback, cambiando a legacy para %s", phone)
+                await llm_agent.set_legacy_fallback(phone)
+                # Caer al flujo legacy abajo
+            else:
+                return  # LLM manejó el mensaje exitosamente
+
+        # ── Legacy Mode ──
         # Verificar si el usuario esta en un flujo multi-paso
         step = await workflow_state.get_step(phone)
         logger.info("[DOCTOR] Step actual para %s: %s", phone, step)

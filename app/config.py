@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # --- Session ---
     SESSION_TIMEOUT_SECONDS: int = Field(default=120, description="Segundos de inactividad antes de cerrar la sesion automaticamente")
 
+    # --- LLM ---
+    LLM_MODE_ENABLED: bool = Field(default=False, description="Habilitar modo LLM para workflow de doctores")
+    OPENAI_API_KEY: str = Field(default="", description="API key de OpenAI para GPT-4o-mini")
+    OPENAI_MODEL: str = Field(default="gpt-4o-mini", description="Modelo de OpenAI a utilizar")
+
     @property
     def is_production(self) -> bool:
         return self.ENVIRONMENT == "production"
