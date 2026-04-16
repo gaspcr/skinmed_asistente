@@ -50,14 +50,25 @@ class DoctorWorkflow(WorkflowHandler):
         # Si LLM está habilitado y la sesión no está en fallback, procesar con LLM
         settings = get_settings()
         if settings.LLM_MODE_ENABLED and not await llm_agent.is_legacy_fallback(phone):
-            logger.info("[DOCTOR] Procesando con LLM para %s", phone)
-            result = await llm_agent.process_message(user, phone, message_text)
-            if result == "FALLBACK":
-                logger.info("[DOCTOR] LLM señaló fallback, cambiando a legacy para %s", phone)
-                await llm_agent.set_legacy_fallback(phone)
+            # TODO: Filtro temporal de debug — ELIMINAR cuando LLM esté listo para producción
+            _LLM_DEBUG_PHONE = "56948776414"
+            if phone != _LLM_DEBUG_PHONE:
+                logger.info("[DOCTOR] LLM en mantenimiento, legacy mode para %s", phone)
+                await WhatsAppService.send_message(
+                    phone,
+                    "🔧 El asistente está en modo mantenimiento. "
+                    "Por favor usa los botones del menú para navegar."
+                )
                 # Caer al flujo legacy abajo
             else:
-                return  # LLM manejó el mensaje exitosamente
+                logger.info("[DOCTOR] Procesando con LLM para %s", phone)
+                result = await llm_agent.process_message(user, phone, message_text)
+                if result == "FALLBACK":
+                    logger.info("[DOCTOR] LLM señaló fallback, cambiando a legacy para %s", phone)
+                    await llm_agent.set_legacy_fallback(phone)
+                    # Caer al flujo legacy abajo
+                else:
+                    return  # LLM manejó el mensaje exitosamente
 
         # ── Legacy Mode ──
         # Verificar si el usuario esta en un flujo multi-paso
