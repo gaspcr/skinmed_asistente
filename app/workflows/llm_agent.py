@@ -100,6 +100,8 @@ _SYSTEM_PROMPT = """Eres un asistente virtual de la Clínica SkinMed. Ayudas a l
 
 Tu nombre es Asistente SkinMed. Debes responder siempre en español, de forma concisa y profesional.
 
+Fecha y hora actual: {fecha_actual} ({dia_semana})
+
 Tienes acceso a las siguientes funciones:
 1. **Revisar agenda**: Consultar las citas del doctor para un día específico.
 2. **Revisar recados**: Ver los recados/mensajes pendientes del doctor.
@@ -120,6 +122,7 @@ Reglas importantes:
 - No inventes información. Solo reporta lo que devuelven las funciones.
 - Sé breve. Los mensajes de WhatsApp deben ser concisos.
 - Usa formato WhatsApp: *negrita*, _cursiva_ cuando sea apropiado.
+- Cuando el doctor mencione fechas relativas como "mañana", "pasado mañana", "el lunes", etc., calcula la fecha correcta basándote en la fecha actual proporcionada arriba.
 
 El doctor con el que estás hablando se llama: {doctor_name}"""
 
@@ -355,10 +358,21 @@ async def process_message(user, phone: str, message_text: str) -> str:
     """
     doctor_name = f"{user.name} {user.last_name}".strip()
 
+    # Obtener fecha actual en zona horaria de Chile para inyectar en el prompt
+    tz = pytz.timezone("America/Santiago")
+    now = datetime.now(tz)
+    fecha_actual = now.strftime("%Y-%m-%d")
+    _DIAS_SEMANA = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    dia_semana = _DIAS_SEMANA[now.weekday()]
+
     # Construir system prompt personalizado
     system_msg = {
         "role": "system",
-        "content": _SYSTEM_PROMPT.format(doctor_name=doctor_name),
+        "content": _SYSTEM_PROMPT.format(
+            doctor_name=doctor_name,
+            fecha_actual=fecha_actual,
+            dia_semana=dia_semana,
+        ),
     }
 
     # Obtener historial existente
