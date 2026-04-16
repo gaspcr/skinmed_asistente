@@ -29,7 +29,7 @@ class Settings(BaseSettings):
     WSP_PHONE_ID: str = Field(description="ID del telefono de WhatsApp")
     WSP_VERIFY_TOKEN: str = Field(description="Token de verificacion de webhook")
     WSP_APP_SECRET: str = Field(description="App Secret para firma HMAC-SHA256")
-    META_API_VERSION: str = Field(default="v24.0", description="Version de la API de Meta Graph")
+    META_API_VERSION: str = Field(default="v25.0", description="Version de la API de Meta Graph")
 
     # --- Redis ---
     REDIS_URL: str = Field(default="redis://localhost:6379/0", description="URL de conexion a Redis")
