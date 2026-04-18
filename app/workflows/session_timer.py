@@ -87,9 +87,13 @@ async def _timeout_check(phone: str):
     # No hubo actividad → timeout
     logger.info("Timeout de inactividad para %s (%ds)", phone, timeout)
 
-    # Limpiar estado y timestamp
+    # Limpiar estado, timestamp, y estado LLM
     await workflow_state.clear_state(phone)
     await redis_svc.delete(_key(phone))
+
+    # Limpiar estado LLM (historial + fallback) para que la próxima sesión empiece limpia
+    from app.workflows import llm_agent
+    await llm_agent.clear_llm_state(phone)
 
     await WhatsAppService.send_message(
         phone,
