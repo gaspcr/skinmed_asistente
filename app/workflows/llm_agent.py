@@ -6,7 +6,7 @@ Mantiene historial en Redis y ejecuta herramientas contra FileMaker.
 """
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pytz
@@ -103,9 +103,10 @@ Tu nombre es Asistente SkinMed. Debes responder siempre en español, de forma co
 Fecha y hora actual: {fecha_actual} ({dia_semana})
 
 Tienes acceso a las siguientes funciones:
-1. **Revisar agenda**: Consultar las citas del doctor para un día específico.
-2. **Revisar recados**: Ver los recados/mensajes pendientes del doctor.
-3. **Publicar recado**: Crear un nuevo recado con una categoría específica.
+1. **Calcular fecha**: Convierte fechas relativas ("mañana", "próximo miércoles") a fecha exacta.
+2. **Revisar agenda**: Consultar las citas del doctor para un día específico.
+3. **Revisar recados**: Ver los recados/mensajes pendientes del doctor.
+4. **Publicar recado**: Crear un nuevo recado con una categoría específica.
 
 Las categorías de recados disponibles son:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -114,7 +115,8 @@ Las categorías de recados disponibles son:
 - "Otros": Para cualquier otro tipo de recado.
 
 Reglas importantes:
-- Cuando el doctor quiera ver su agenda, usa la función revisar_agenda.
+- IMPORTANTE: Cuando el doctor mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
+- Cuando el doctor quiera ver su agenda, usa la función revisar_agenda. Si menciona una fecha relativa, primero llama a calcular_fecha y luego usa el resultado en revisar_agenda.
 - Cuando el doctor quiera ver sus recados/mensajes, usa la función revisar_recados.
 - Cuando el doctor quiera dejar un recado o mensaje, usa la función publicar_recado. Asegúrate de identificar la categoría correcta y el contenido del mensaje.
 - Si el doctor te pide algo que NO puedes hacer con las funciones disponibles, responde EXACTAMENTE con el prefijo "[FALLBACK]" seguido de un mensaje amable indicando que no puedes ayudar con eso.
@@ -122,7 +124,6 @@ Reglas importantes:
 - No inventes información. Solo reporta lo que devuelven las funciones.
 - Sé breve. Los mensajes de WhatsApp deben ser concisos.
 - Usa formato WhatsApp: *negrita*, _cursiva_ cuando sea apropiado.
-- Cuando el doctor mencione fechas relativas como "mañana", "pasado mañana", "el lunes", etc., calcula la fecha correcta basándote en la fecha actual proporcionada arriba.
 
 El doctor con el que estás hablando se llama: {doctor_name}"""
 
@@ -135,14 +136,36 @@ TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "calcular_fecha",
+            "description": "Calcula una fecha exacta a partir de una referencia relativa. Usa esta función SIEMPRE que necesites convertir expresiones como 'mañana', 'próximo miércoles', 'en 3 días', etc. a una fecha real.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "dias_offset": {
+                        "type": "integer",
+                        "description": "Número de días desde hoy. Ejemplo: 1 para mañana, 2 para pasado mañana, -1 para ayer, 0 para hoy.",
+                    },
+                    "dia_semana": {
+                        "type": "string",
+                        "enum": ["lunes", "martes", "miercoles", "jueves", "viernes", "sabado", "domingo"],
+                        "description": "Día de la semana para buscar la próxima ocurrencia. Ejemplo: 'miercoles' para el próximo miércoles.",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "revisar_agenda",
-            "description": "Consulta la agenda de citas del doctor para un día específico. Si no se indica fecha, muestra la agenda de hoy.",
+            "description": "Consulta la agenda de citas del doctor para un día específico. Si no se indica fecha, muestra la agenda de hoy. IMPORTANTE: si el doctor pide agenda para una fecha relativa (mañana, próximo lunes, etc.), primero usa calcular_fecha para obtener la fecha exacta.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "fecha": {
                         "type": "string",
-                        "description": "Fecha en formato ISO YYYY-MM-DD (ejemplo: 2026-04-15 para el 15 de abril de 2026). Si no se indica, se usa la fecha de hoy.",
+                        "description": "Fecha en formato ISO YYYY-MM-DD (ejemplo: 2026-04-15). Si no se indica, se usa la fecha de hoy.",
                     }
                 },
                 "required": [],
@@ -208,7 +231,9 @@ async def _execute_tool(tool_name: str, arguments: Dict[str, Any], user) -> str:
         String con el resultado de la herramienta.
     """
     try:
-        if tool_name == "revisar_agenda":
+        if tool_name == "calcular_fecha":
+            return _tool_calcular_fecha(arguments)
+        elif tool_name == "revisar_agenda":
             return await _tool_revisar_agenda(user, arguments)
         elif tool_name == "revisar_recados":
             return await _tool_revisar_recados(user)
@@ -222,6 +247,41 @@ async def _execute_tool(tool_name: str, arguments: Dict[str, Any], user) -> str:
     except Exception as e:
         logger.exception("[LLM_AGENT] Error inesperado en herramienta %s", tool_name)
         return f"Error inesperado al ejecutar la función: {e}"
+
+def _tool_calcular_fecha(arguments: Dict[str, Any]) -> str:
+    """Calcula una fecha exacta basándose en la fecha actual de Chile."""
+    tz = pytz.timezone("America/Santiago")
+    now = datetime.now(tz)
+    today = now.date()
+
+    _DIAS_MAP = {
+        "lunes": 0, "martes": 1, "miercoles": 2, "miércoles": 2,
+        "jueves": 3, "viernes": 4, "sabado": 5, "sábado": 5, "domingo": 6,
+    }
+    _DIAS_NOMBRES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+    dias_offset = arguments.get("dias_offset")
+    dia_semana = arguments.get("dia_semana")
+
+    if dias_offset is not None:
+        target = today + timedelta(days=int(dias_offset))
+    elif dia_semana:
+        target_weekday = _DIAS_MAP.get(dia_semana.lower().strip())
+        if target_weekday is None:
+            return f"Día de la semana no reconocido: '{dia_semana}'"
+        # Calcular próxima ocurrencia (si hoy es ese día, ir a la próxima semana)
+        days_ahead = target_weekday - today.weekday()
+        if days_ahead <= 0:
+            days_ahead += 7
+        target = today + timedelta(days=days_ahead)
+    else:
+        target = today
+
+    dia_nombre = _DIAS_NOMBRES[target.weekday()]
+    fecha_iso = target.strftime("%Y-%m-%d")
+    fecha_display = target.strftime("%d de %B de %Y")
+
+    return f"Fecha calculada: {fecha_iso} ({dia_nombre}, {fecha_display}). Usa este valor en formato YYYY-MM-DD para llamar a otras funciones."
 
 
 async def _tool_revisar_agenda(user, arguments: Dict[str, Any]) -> str:
