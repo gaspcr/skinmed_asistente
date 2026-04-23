@@ -52,7 +52,8 @@ class DoctorWorkflow(WorkflowHandler):
         if settings.LLM_MODE_ENABLED and not await llm_agent.is_legacy_fallback(phone):
             # TODO: Filtro temporal de debug — ELIMINAR cuando LLM esté listo para producción
             _LLM_DEBUG_PHONES = {"56948776414", "56939129139"}
-            if phone not in _LLM_DEBUG_PHONES:
+            mantenimiento = False
+            if phone not in _LLM_DEBUG_PHONES and mantenimiento:
                 logger.info("[DOCTOR] LLM en mantenimiento, legacy mode para %s", phone)
                 await WhatsAppService.send_message(
                     phone,
