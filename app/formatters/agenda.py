@@ -102,9 +102,9 @@ class AgendaFormatter:
         """Formatea la agenda y retorna (mensaje_agenda, mensaje_glosario).
         El glosario es None si no hay abreviaciones que mostrar."""
         if not data:
-            return "No hay citas agendadas para hoy.", None
+            return "No hay citas agendadas para día solicitado.", None
         
-        msg = f"*Hola Dr(a). {doctor_name}*\nAgenda para hoy:\n\n"
+        msg = f"*Hola Dr(a). {doctor_name}*\nAgenda para día solicitado:\n\n"
         
         ignorar_tipo = ["Eliminada", "Bloqueada", "No Viene"]
         ignorar_actividad = ["RECORDATORIO", "VISITADOR MÉDICO", "LABORATORIO"]
@@ -118,7 +118,7 @@ class AgendaFormatter:
         validos.sort(key=lambda x: x['fieldData']['Hora'])
 
         if not validos:
-            return f"*Hola Dr(a). {doctor_name}*\nNo tienes citas agendadas hoy.", None
+            return f"*Hola Dr(a). {doctor_name}*\nNo tienes citas agendadas día solicitado.", None
 
         abreviaturas_usadas = set()
 
