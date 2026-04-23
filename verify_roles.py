@@ -105,7 +105,7 @@ def test_role_registry():
     llm_roles = get_registered_llm_roles()
     print(f"Roles con config LLM: {llm_roles}")
     
-    expected_llm_roles = ['medico']
+    expected_llm_roles = ['medico', 'gerencia']
     missing_llm = [r for r in expected_llm_roles if r not in llm_roles]
     if missing_llm:
         print(f"❌ FALTA: Configs LLM esperadas no encontradas: {missing_llm}")

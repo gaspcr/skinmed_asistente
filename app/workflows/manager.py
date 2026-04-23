@@ -6,10 +6,12 @@ from datetime import datetime
 import pytz
 from fastapi import BackgroundTasks
 
+from app.config import get_settings
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
 from app.workflows import session_timer
+from app.workflows.llm import engine as llm_engine
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.services import redis as redis_svc
@@ -67,6 +69,7 @@ class ManagerWorkflow(WorkflowHandler):
         if texto == "salir":
             await workflow_state.clear_state(phone)
             await _clear_doctor_mode(phone)
+            await llm_engine.clear_llm_state(phone)
             await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
@@ -82,6 +85,7 @@ class ManagerWorkflow(WorkflowHandler):
             if texto == "menu":
                 await workflow_state.clear_state(phone)
                 await _clear_doctor_mode(phone)
+                await llm_engine.clear_llm_state(phone)
                 await self._send_menu(user, phone)
                 return
 
@@ -93,8 +97,28 @@ class ManagerWorkflow(WorkflowHandler):
 
         if texto == "menu":
             await workflow_state.clear_state(phone)
+            await llm_engine.clear_llm_state(phone)
             await self._send_menu(user, phone)
             return
+
+        # ── LLM Mode ──
+        settings = get_settings()
+        role = getattr(user, "role", "gerencia")
+
+        if settings.LLM_MODE_ENABLED and not await llm_engine.is_legacy_fallback(phone):
+            # Verificar modo mantención
+            if settings.llm_is_in_maintenance(role, phone):
+                logger.info("[MANAGER] LLM en mantención para %s (rol=%s)", phone, role)
+                # Caer al flujo legacy abajo
+            else:
+                logger.info("[MANAGER] Procesando con LLM para %s", phone)
+                result = await llm_engine.process_message(user, phone, message_text, role="gerencia")
+                if result == "FALLBACK" and settings.llm_has_legacy_fallback(role):
+                    logger.info("[MANAGER] LLM señaló fallback, cambiando a legacy para %s", phone)
+                    await llm_engine.set_legacy_fallback(phone)
+                    # Caer al flujo legacy abajo
+                else:
+                    return  # LLM manejó el mensaje exitosamente
 
         # Verificar flujo multi-paso
         step = await workflow_state.get_step(phone)
