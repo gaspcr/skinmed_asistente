@@ -211,6 +211,13 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
                     func_name, func_args, user, phone, config.tool_handlers,
                 )
 
+                # Log del resultado para debugging
+                result_preview = result[:500] + "..." if len(result) > 500 else result
+                logger.info(
+                    "[LLM_DEBUG] Tool result %s -> %s [%s]",
+                    func_name, result_preview, phone,
+                )
+
                 # Agregar resultado al historial
                 tool_result_msg = {
                     "role": "tool",
@@ -241,6 +248,11 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
 
         # Enviar respuesta al usuario
         if final_content:
+            logger.info(
+                "[LLM_DEBUG] Respuesta final LLM (%d chars) para %s: %s",
+                len(final_content), phone,
+                final_content[:300] + "..." if len(final_content) > 300 else final_content,
+            )
             await WhatsAppService.send_message(phone, final_content)
         else:
             logger.warning("[LLM_ENGINE] LLM retornó contenido vacío para %s", phone)

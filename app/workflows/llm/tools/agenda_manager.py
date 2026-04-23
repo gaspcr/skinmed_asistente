@@ -180,12 +180,25 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
 
     # Consultar FileMaker
     all_data = await FileMakerService.get_agenda_all_doctors(filemaker_date)
+    logger.info(
+        "[AGENDA_MGR] FM raw: %d registros para %s",
+        len(all_data) if all_data else 0, fecha_display,
+    )
 
     # Filtrar citas inválidas
     valid_data = _filtrar_citas_validas(all_data)
+    logger.info(
+        "[AGENDA_MGR] Post-filtro: %d citas válidas de %d totales",
+        len(valid_data), len(all_data) if all_data else 0,
+    )
 
     # Agrupar por doctor
     doctors = _agrupar_por_doctor(valid_data)
+    logger.info(
+        "[AGENDA_MGR] Doctores con agenda: %d — %s",
+        len(doctors),
+        {name: len(citas) for name, citas in doctors.items()},
+    )
 
     # Aplicar filtro de doctor si se especificó
     if filtro_doctor:
@@ -193,6 +206,10 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
             name: citas for name, citas in doctors.items()
             if _match_doctor(name, filtro_doctor)
         }
+        logger.info(
+            "[AGENDA_MGR] Filtro doctor='%s': %d match(es) de %d",
+            filtro_doctor, len(filtered), len(doctors),
+        )
         if not filtered:
             # Sugerir doctores similares
             all_names = list(doctors.keys())
@@ -205,6 +222,13 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
 
     # Formatear resultado
     if solo_resumen:
-        return _formatear_resumen(doctors, fecha_display)
+        result = _formatear_resumen(doctors, fecha_display)
     else:
-        return _formatear_detalle(doctors, fecha_display)
+        result = _formatear_detalle(doctors, fecha_display)
+
+    logger.info(
+        "[AGENDA_MGR] Resultado (%d chars): %s",
+        len(result),
+        result[:500] + "..." if len(result) > 500 else result,
+    )
+    return result
