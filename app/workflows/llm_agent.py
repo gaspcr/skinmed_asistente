@@ -319,9 +319,7 @@ async def _tool_revisar_agenda(user, phone: str, arguments: Dict[str, Any]) -> s
         await WhatsAppService.send_message(phone, glossary)
 
     # Retornar resumen breve al LLM para que formule su respuesta conversacional
-    num_citas = len(agenda_data) if agenda_data else 0
-    fecha_display = fecha_input or "hoy"
-    return f"Agenda enviada al doctor. {num_citas} registros encontrados para {fecha_display}. La agenda y el glosario ya fueron enviados por WhatsApp, NO los repitas. Solo agrega un breve comentario conversacional."
+    return f"Agenda enviada al doctor. Informa y pregunta en qué más puedes ayudar."
 
 
 async def _tool_revisar_recados(user, phone: str) -> str:
