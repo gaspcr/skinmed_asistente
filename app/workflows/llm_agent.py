@@ -219,7 +219,7 @@ TOOLS = [
 # Tool execution
 # ──────────────────────────────────────────────
 
-async def _execute_tool(tool_name: str, arguments: Dict[str, Any], user) -> str:
+async def _execute_tool(tool_name: str, arguments: Dict[str, Any], user, phone: str) -> str:
     """
     Ejecuta una herramienta y retorna el resultado como string para el LLM.
 
@@ -227,6 +227,7 @@ async def _execute_tool(tool_name: str, arguments: Dict[str, Any], user) -> str:
         tool_name: Nombre de la función a ejecutar.
         arguments: Argumentos de la función (parseados del JSON del LLM).
         user: Objeto User con datos del doctor.
+        phone: Número de teléfono del doctor.
 
     Returns:
         String con el resultado de la herramienta.
@@ -235,9 +236,9 @@ async def _execute_tool(tool_name: str, arguments: Dict[str, Any], user) -> str:
         if tool_name == "calcular_fecha":
             return _tool_calcular_fecha(arguments)
         elif tool_name == "revisar_agenda":
-            return await _tool_revisar_agenda(user, arguments)
+            return await _tool_revisar_agenda(user, phone, arguments)
         elif tool_name == "revisar_recados":
-            return await _tool_revisar_recados(user)
+            return await _tool_revisar_recados(user, phone)
         elif tool_name == "publicar_recado":
             return await _tool_publicar_recado(user, arguments)
         else:
@@ -285,8 +286,8 @@ def _tool_calcular_fecha(arguments: Dict[str, Any]) -> str:
     return f"Fecha calculada: {fecha_iso} ({dia_nombre}, {fecha_display}). Usa este valor en formato YYYY-MM-DD para llamar a otras funciones."
 
 
-async def _tool_revisar_agenda(user, arguments: Dict[str, Any]) -> str:
-    """Ejecuta la consulta de agenda."""
+async def _tool_revisar_agenda(user, phone: str, arguments: Dict[str, Any]) -> str:
+    """Ejecuta la consulta de agenda y envía el resultado directamente por WhatsApp."""
     fecha_input = arguments.get("fecha")
     filemaker_date = None
 
@@ -312,15 +313,19 @@ async def _tool_revisar_agenda(user, arguments: Dict[str, Any]) -> str:
     agenda_data = await FileMakerService.get_agenda_raw(user.id, filemaker_date)
     formatted_msg, glossary = AgendaFormatter.format(agenda_data, user.name)
 
-    result = formatted_msg
+    # Enviar agenda formateada directamente por WhatsApp
+    await WhatsAppService.send_message(phone, formatted_msg)
     if glossary:
-        result += f"\n\n{glossary}"
+        await WhatsAppService.send_message(phone, glossary)
 
-    return result
+    # Retornar resumen breve al LLM para que formule su respuesta conversacional
+    num_citas = len(agenda_data) if agenda_data else 0
+    fecha_display = fecha_input or "hoy"
+    return f"Agenda enviada al doctor. {num_citas} registros encontrados para {fecha_display}. La agenda y el glosario ya fueron enviados por WhatsApp, NO los repitas. Solo agrega un breve comentario conversacional."
 
 
-async def _tool_revisar_recados(user) -> str:
-    """Ejecuta la consulta de recados."""
+async def _tool_revisar_recados(user, phone: str) -> str:
+    """Ejecuta la consulta de recados y envía el resultado directamente por WhatsApp."""
     recados_data = await FileMakerService.get_recados(user.id)
 
     # Resolver IDs de pacientes a nombres
@@ -334,7 +339,14 @@ async def _tool_revisar_recados(user) -> str:
             except Exception:
                 pacient_names[pac_id] = "Paciente desconocido"
 
-    return RecadosFormatter.format(recados_data, user.name, user.last_name, pacient_names)
+    formatted_msg = RecadosFormatter.format(recados_data, user.name, user.last_name, pacient_names)
+
+    # Enviar recados formateados directamente por WhatsApp
+    await WhatsAppService.send_message(phone, formatted_msg)
+
+    # Retornar resumen breve al LLM
+    num_recados = len(recados_data) if recados_data else 0
+    return f"Recados enviados al doctor. {num_recados} recado(s) encontrado(s). Los recados ya fueron enviados por WhatsApp, NO los repitas. Solo agrega un breve comentario conversacional."
 
 
 async def _tool_publicar_recado(user, arguments: Dict[str, Any]) -> str:
@@ -478,7 +490,7 @@ async def process_message(user, phone: str, message_text: str) -> str:
                     func_name, func_args, phone,
                 )
 
-                result = await _execute_tool(func_name, func_args, user)
+                result = await _execute_tool(func_name, func_args, user, phone)
 
                 # Agregar resultado al historial
                 tool_result_msg = {
