@@ -9,7 +9,8 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Importar workflows para activar decoradores
-from app.workflows import doctor, manager, nurse
+from app.workflows import doctor, manager, hybrid
+from app.workflows.llm.config import get_registered_llm_roles, get_llm_config
 from app.workflows.role_registry import (
     get_registered_roles, 
     get_workflow_handler,
@@ -30,7 +31,7 @@ def test_role_registry():
     print(f"Total: {len(registered_roles)} roles")
     print()
     
-    expected_roles = ['medico', 'gerencia', 'enfermeria']
+    expected_roles = ['medico', 'gerencia', 'medico_gerencia']
     missing_roles = [r for r in expected_roles if r not in registered_roles]
     
     if missing_roles:
@@ -98,12 +99,31 @@ def test_role_registry():
         return False
     print()
     
+    # Test 5: Verificar configuraciones LLM
+    print("🤖 Test 5: Configuraciones LLM")
+    print("-" * 60)
+    llm_roles = get_registered_llm_roles()
+    print(f"Roles con config LLM: {llm_roles}")
+    
+    expected_llm_roles = ['medico']
+    missing_llm = [r for r in expected_llm_roles if r not in llm_roles]
+    if missing_llm:
+        print(f"❌ FALTA: Configs LLM esperadas no encontradas: {missing_llm}")
+        return False
+    
+    for role in llm_roles:
+        cfg = get_llm_config(role)
+        tools = [t['function']['name'] for t in cfg.tools]
+        print(f"✅ {role:20} -> {len(cfg.tools)} tools: {tools}")
+    print()
+    
     print("=" * 60)
     print("🎉 TODAS LAS VERIFICACIONES PASARON")
     print("=" * 60)
     print()
     print("📝 Resumen:")
     print(f"   - {len(registered_roles)} roles registrados correctamente")
+    print(f"   - {len(llm_roles)} configuraciones LLM registradas")
     print(f"   - Todos los handlers funcionan")
     print(f"   - Validación de roles funciona")
     print(f"   - Normalización funciona correctamente")

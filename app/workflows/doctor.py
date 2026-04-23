@@ -6,7 +6,7 @@ import pytz
 from fastapi import BackgroundTasks
 
 from app.config import get_settings
-from app.workflows import llm_agent
+from app.workflows.llm import engine as llm_engine
 
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
@@ -31,14 +31,14 @@ class DoctorWorkflow(WorkflowHandler):
         if texto == "menu":
             logger.info("[DOCTOR] Comando 'menu' recibido de %s", phone)
             await workflow_state.clear_state(phone)
-            await llm_agent.clear_llm_state(phone)
+            await llm_engine.clear_llm_state(phone)
             await self._send_menu(user, phone)
             return
 
         if texto == "salir":
             logger.info("[DOCTOR] Comando 'salir' recibido de %s", phone)
             await workflow_state.clear_state(phone)
-            await llm_agent.clear_llm_state(phone)
+            await llm_engine.clear_llm_state(phone)
             await session_timer.cancel(phone)
             await WhatsAppService.send_message(
                 phone,
@@ -47,14 +47,13 @@ class DoctorWorkflow(WorkflowHandler):
             return
 
         # ── LLM Mode ──
-        # Si LLM está habilitado y la sesión no está en fallback, procesar con LLM
         settings = get_settings()
-        if settings.LLM_MODE_ENABLED and not await llm_agent.is_legacy_fallback(phone):
-            # TODO: Filtro temporal de debug — ELIMINAR cuando LLM esté listo para producción
-            _LLM_DEBUG_PHONES = {"56948776414", "56939129139"}
-            mantenimiento = False
-            if phone not in _LLM_DEBUG_PHONES and mantenimiento:
-                logger.info("[DOCTOR] LLM en mantenimiento, legacy mode para %s", phone)
+        role = getattr(user, "role", "medico")
+
+        if settings.LLM_MODE_ENABLED and not await llm_engine.is_legacy_fallback(phone):
+            # Verificar modo mantención (configurable via env vars)
+            if settings.llm_is_in_maintenance(role, phone):
+                logger.info("[DOCTOR] LLM en mantención para %s (rol=%s)", phone, role)
                 await WhatsAppService.send_message(
                     phone,
                     "🔧 El asistente está en modo mantenimiento. "
@@ -63,10 +62,10 @@ class DoctorWorkflow(WorkflowHandler):
                 # Caer al flujo legacy abajo
             else:
                 logger.info("[DOCTOR] Procesando con LLM para %s", phone)
-                result = await llm_agent.process_message(user, phone, message_text)
-                if result == "FALLBACK":
+                result = await llm_engine.process_message(user, phone, message_text, role="medico")
+                if result == "FALLBACK" and settings.llm_has_legacy_fallback(role):
                     logger.info("[DOCTOR] LLM señaló fallback, cambiando a legacy para %s", phone)
-                    await llm_agent.set_legacy_fallback(phone)
+                    await llm_engine.set_legacy_fallback(phone)
                     # Caer al flujo legacy abajo
                 else:
                     return  # LLM manejó el mensaje exitosamente

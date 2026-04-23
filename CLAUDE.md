@@ -49,10 +49,13 @@ No test suite or linter is configured.
 - `RATE_LIMIT_MAX` — Max messages per rate limit window (default: `30`)
 - `RATE_LIMIT_WINDOW` — Rate limit window in seconds (default: `60`)
 - `MAX_MESSAGE_LENGTH` — Max accepted text message length (default: `500`)
-- `LLM_ENABLED` — Enable LLM mode (`True`) or use legacy strict mode (`False`) (default: `True`)
-- `OPENAI_API_KEY` — API Key de OpenAI (required when `LLM_ENABLED=True`)
-- `LLM_MODEL` — OpenAI model to use (default: `gpt-4o-mini`)
-- `LLM_MAX_HISTORY` — Max conversation messages to keep for LLM context (default: `10`)
+- `LLM_MODE_ENABLED` — Enable LLM mode globally (`True`/`False`) (default: `False`)
+- `OPENAI_API_KEY` — API Key de OpenAI (required when `LLM_MODE_ENABLED=True`)
+- `OPENAI_MODEL` — OpenAI model to use (default: `gpt-4o-mini`)
+- `LLM_LEGACY_FALLBACK_ROLES` — Roles with legacy fallback enabled, CSV (default: `medico`)
+- `LLM_MAINTENANCE_ENABLED` — Global LLM maintenance mode (default: `False`)
+- `LLM_MAINTENANCE_ROLES` — Roles in LLM maintenance, CSV (default: ``)
+- `LLM_MAINTENANCE_BYPASS_PHONES` — Phones that bypass LLM maintenance, CSV (default: ``)
 
 All required vars are validated at startup via `app/config.py` using `pydantic-settings`. The app refuses to start if any are missing.
 
@@ -80,10 +83,14 @@ All required vars are validated at startup via `app/config.py` using `pydantic-s
 - `app/services/filemaker.py` — FileMaker Data API client with 14-min token caching, auto 401-retry, retry with backoff, and circuit breaker protection
 - `app/services/whatsapp.py` — WhatsApp Business API client (text, templates) with retry on 5xx/connection errors
 - `app/middleware.py` — HMAC-SHA256 webhook signature verification + `SecurityHeadersMiddleware` (HSTS, X-Frame-Options, nosniff, XSS protection)
-- `app/services/llm.py` — LLM service using Instructor + OpenAI for structured Function Calling with Pydantic response models
+- `app/services/llm_service.py` — Wrapper para OpenAI Chat Completions API con function calling (httpx)
 - `app/auth/` — User model and auth service with phone-based lookup (cached in Redis)
 - `app/workflows/` — Role-based handlers dispatched via decorator registration
-- `app/workflows/tools/doctor_tools.py` — Pydantic tool schemas for doctor workflow (ConsultarAgendaHoy, ConsultarAgendaOtraFecha, EnviarRecado, VerRecados, Despedirse, ResponderConversacion)
+- `app/workflows/llm/` — Paquete LLM transversal (engine genérico + tools + configs por rol)
+- `app/workflows/llm/engine.py` — Motor genérico del agente LLM (agent loop, historial Redis, fallback)
+- `app/workflows/llm/config.py` — `RoleLLMConfig` dataclass + registry para auto-registrar configs por rol
+- `app/workflows/llm/tools/` — Tools reutilizables (shared, agenda, recados)
+- `app/workflows/llm/roles/doctor.py` — Config LLM del doctor (system prompt, tools, handlers)
 - `app/workflows/state.py` — Unified workflow state management (get_state/set_state/clear_state)
 - `app/formatters/agenda.py` — Formats appointment data for WhatsApp display
 - `app/exceptions.py` — Custom exceptions (`ServicioNoDisponibleError`, `FileMakerAuthError`)
@@ -113,14 +120,39 @@ All workflow classes extend `WorkflowHandler` (abstract base in `app/workflows/b
 - `handle_button(user, phone, button_title, background_tasks)` — processes button interactions
 
 **Currently registered:**
-- `medico` — Fully implemented
-- `gerencia` — Basic stub
-- `enfermeria` — Basic stub
+- `medico` — Fully implemented (LLM + legacy fallback)
+- `gerencia` — Fully implemented (legacy only, LLM planned)
+- `medico_gerencia` — Hybrid: inherits from `gerencia` with access to doctor mode
 
 **To add a new role:**
 1. Create workflow class in `app/workflows/`
 2. Decorate with `@register_workflow("role_name")`
-3. Import it in `app/workflows/__init__.py`
+3. Import it in `main.py`
+
+### LLM System (Transversal)
+
+The LLM is implemented as a role-agnostic engine (`app/workflows/llm/engine.py`) with per-role configuration. Each role defines its own `RoleLLMConfig` (system prompt, tools, handlers) and registers it automatically.
+
+**To add LLM to a new role:**
+1. Create config file in `app/workflows/llm/roles/<role>.py`
+2. Define `RoleLLMConfig` with prompt, tools, handlers
+3. Call `register_llm_config(config)` at module level
+4. Import the config in `app/workflows/__init__.py`
+5. Add LLM mode block in the workflow's `handle_text()` using `llm_engine.process_message()`
+
+Tools are reusable across roles via `app/workflows/llm/tools/`.
+
+**Maintenance & fallback:**
+- `LLM_MAINTENANCE_ENABLED` — Global kill switch
+- `LLM_MAINTENANCE_ROLES` — Per-role maintenance (CSV)
+- `LLM_MAINTENANCE_BYPASS_PHONES` — Phone bypass list (CSV)
+- `LLM_LEGACY_FALLBACK_ROLES` — Roles that fall back to legacy on LLM failure (CSV)
+
+```python
+settings = get_settings()
+settings.llm_is_in_maintenance(role, phone)  # bool
+settings.llm_has_legacy_fallback(role)        # bool
+```
 
 ### Workflow State Management
 

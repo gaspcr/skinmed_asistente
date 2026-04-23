@@ -92,8 +92,8 @@ async def _timeout_check(phone: str):
     await redis_svc.delete(_key(phone))
 
     # Limpiar estado LLM (historial + fallback) para que la próxima sesión empiece limpia
-    from app.workflows import llm_agent
-    await llm_agent.clear_llm_state(phone)
+    from app.workflows.llm import engine as llm_engine
+    await llm_engine.clear_llm_state(phone)
 
     await WhatsAppService.send_message(
         phone,

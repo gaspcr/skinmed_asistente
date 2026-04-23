@@ -54,9 +54,47 @@ class Settings(BaseSettings):
     SESSION_TIMEOUT_SECONDS: int = Field(default=120, description="Segundos de inactividad antes de cerrar la sesion automaticamente")
 
     # --- LLM ---
-    LLM_MODE_ENABLED: bool = Field(default=False, description="Habilitar modo LLM para workflow de doctores")
+    LLM_MODE_ENABLED: bool = Field(default=False, description="Habilitar modo LLM globalmente")
     OPENAI_API_KEY: str = Field(default="", description="API key de OpenAI para GPT-4o-mini")
     OPENAI_MODEL: str = Field(default="gpt-4o-mini", description="Modelo de OpenAI a utilizar")
+
+    # Fallback: roles que caen a legacy cuando el LLM falla (CSV: "medico,gerencia")
+    LLM_LEGACY_FALLBACK_ROLES: str = Field(
+        default="medico",
+        description="Roles con fallback a legacy habilitado (separados por coma)",
+    )
+
+    # Mantencion: permite desactivar LLM para ciertos roles/telefonos
+    LLM_MAINTENANCE_ENABLED: bool = Field(
+        default=False,
+        description="Activar modo mantencion global del LLM (deshabilita LLM para todos salvo bypass)",
+    )
+    LLM_MAINTENANCE_ROLES: str = Field(
+        default="",
+        description="Roles en mantencion LLM (separados por coma). Se aplica incluso si mantencion global está desactivada",
+    )
+    LLM_MAINTENANCE_BYPASS_PHONES: str = Field(
+        default="",
+        description="Telefonos que bypasean mantencion LLM (separados por coma)",
+    )
+
+    # --- Helpers LLM ---
+    def llm_has_legacy_fallback(self, role: str) -> bool:
+        """Verifica si un rol tiene fallback a legacy habilitado."""
+        roles = {r.strip().lower() for r in self.LLM_LEGACY_FALLBACK_ROLES.split(",") if r.strip()}
+        return role.lower().strip() in roles
+
+    def llm_is_in_maintenance(self, role: str, phone: str) -> bool:
+        """Verifica si el LLM está en mantención para un rol/teléfono."""
+        bypass_phones = {p.strip() for p in self.LLM_MAINTENANCE_BYPASS_PHONES.split(",") if p.strip()}
+        if phone in bypass_phones:
+            return False
+
+        if self.LLM_MAINTENANCE_ENABLED:
+            return True
+
+        maint_roles = {r.strip().lower() for r in self.LLM_MAINTENANCE_ROLES.split(",") if r.strip()}
+        return role.lower().strip() in maint_roles
 
     @property
     def is_production(self) -> bool:
