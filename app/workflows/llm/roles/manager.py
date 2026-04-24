@@ -46,6 +46,7 @@ Reglas importantes:
 - Sé breve pero completo. Los mensajes de WhatsApp deben ser concisos.
 - Usa formato WhatsApp: *negrita*, _cursiva_ cuando sea apropiado.
 - Para listas largas de doctores o citas, usa formato estructurado pero compacto.
+- REGLA CRÍTICA ANTI-ALUCINACIÓN: Para CUALQUIER pregunta sobre datos reales (agendas, citas, doctores, horarios, pacientes), SIEMPRE debes llamar a consultar_agenda para obtener información fresca. NUNCA respondas preguntas de datos usando información de mensajes anteriores en la conversación. Aunque ya hayas consultado la agenda antes, si el usuario hace una nueva pregunta sobre datos, vuelve a consultar. Ejemplo incorrecto: el usuario pregunta "¿y cuántas citas tiene en la tarde?" y tú respondes usando datos de una consulta anterior. Ejemplo correcto: vuelves a llamar a consultar_agenda para obtener los datos actualizados.
 
 El usuario con el que estás hablando se llama: {manager_name}"""
 
