@@ -178,6 +178,9 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
             tools=config.tools,
         )
 
+        # Log de la respuesta inicial de OpenAI
+        _log_llm_response(assistant_response, phone, role, step="initial")
+
         # Procesar tool calls si existen (agent loop)
         max_iterations = 5  # Prevenir loops infinitos
         iteration = 0
@@ -232,6 +235,9 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
                 messages=messages,
                 tools=config.tools,
             )
+
+            # Log de la respuesta post-tool de OpenAI
+            _log_llm_response(assistant_response, phone, role, step=f"post-tool-{iteration}")
 
         # Respuesta final del LLM (sin tool calls)
         final_content = assistant_response.get("content", "")
@@ -305,3 +311,39 @@ def _serialize_assistant_message(response: Dict[str, Any]) -> Dict[str, Any]:
         ]
 
     return msg
+
+
+def _log_llm_response(response: Dict[str, Any], phone: str, role: str, step: str):
+    """
+    Loguea la respuesta de OpenAI de forma legible para debugging.
+
+    Muestra:
+    - Si el modelo devolvió tool_calls (con nombre y argumentos)
+    - Si el modelo devolvió content directo (truncado)
+    - El paso del agent loop (initial, post-tool-1, etc.)
+    """
+    tool_calls = response.get("tool_calls")
+    content = response.get("content")
+
+    if tool_calls:
+        calls_summary = ", ".join(
+            f"{tc['function']['name']}({tc['function']['arguments']})"
+            for tc in tool_calls
+        )
+        logger.info(
+            "[LLM_DEBUG] OpenAI response [%s] step=%s: TOOL_CALLS=[%s] content=%s [%s]",
+            role, step, calls_summary,
+            repr(content[:100]) if content else "null",
+            phone,
+        )
+    elif content:
+        preview = content[:300] + "..." if len(content) > 300 else content
+        logger.info(
+            "[LLM_DEBUG] OpenAI response [%s] step=%s: CONTENT (%d chars)=%s [%s]",
+            role, step, len(content), preview, phone,
+        )
+    else:
+        logger.warning(
+            "[LLM_DEBUG] OpenAI response [%s] step=%s: EMPTY (no content, no tool_calls) [%s]",
+            role, step, phone,
+        )
