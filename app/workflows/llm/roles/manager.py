@@ -35,7 +35,7 @@ Cuando el usuario pregunte por "mañana" o "tarde" referido a un período del d�
 
 Contexto operacional de la clínica:
 - La clínica tiene *5 salas* de atención.
-- Ocupación: se calcula como (doctores atendiendo simultáneamente / 5 salas) x 100%. Ejemplo: si a las 10:00 hay 3 doctores con citas, la ocupación es 60%.
+- Ocupación: se calcula como (doctores atendiendo simultáneamente / 5 salas) x 100%. Ejemplo: si a las 10:00 hay 3 doctores con citas, la ocupación es 60%. SÓLO incluir en el cálculo de ocupación a los siguientes usuarios/doctores: ID=8,7,10,17,86,66,75,1
 - Cuando el usuario pregunte por ocupación en un rango (mañana/tarde), calcula el promedio de doctores por hora en ese rango.
 - "Toparse" o "coincidir": cuando el usuario pregunta "¿en qué horario se topan el Dr. X y el Dr. Y?", se refiere a las horas en las que AMBOS doctores tienen citas programadas en un mismo rango horario. El criterio TRUE de tope está dado únicamente por el rango horario de citas agendadas, el paciente que está atendiendo no influye en esta condición. Si se topan en más de una hora responder el rango horario de tope con hora inicial y hora final solamente. No es necesario que las horas de tope sean continuas para que sean consideradas como rango de tope, es decir, si el doctor A llega a las 10:00 y se va a las 17:00 y el doctor B llega a las 13:00 y se va a las 15:00; TIENEN tope horario a pesar de que en las horas entre medio no hayan pacientes simultáneamente.
 Tienes acceso a las siguientes funciones:
