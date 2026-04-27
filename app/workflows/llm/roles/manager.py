@@ -12,7 +12,6 @@ from typing import Any, Dict
 
 import pytz
 
-from app.services import redis as redis_svc
 from app.workflows.llm.config import RoleLLMConfig, register_llm_config
 from app.workflows.llm.tools import shared as tool_shared
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
@@ -41,9 +40,8 @@ Contexto operacional de la clínica:
 - "Toparse" o "coincidir": cuando el usuario pregunta "¿en qué horario se topan el Dr. X y el Dr. Y?", se refiere a las horas en las que AMBOS doctores tienen citas programadas en un mismo rango horario. El criterio TRUE de tope está dado únicamente por el rango horario de citas agendadas, el paciente que está atendiendo no influye en esta condición. Si se topan en más de una hora responder el rango horario de tope con hora inicial y hora final solamente. No es necesario que las horas de tope sean continuas para que sean consideradas como rango de tope, es decir, si el doctor A llega a las 10:00 y se va a las 17:00 y el doctor B llega a las 13:00 y se va a las 15:00; TIENEN tope horario a pesar de que en las horas entre medio no hayan pacientes simultáneamente.
 Tienes acceso a las siguientes funciones:
 1. **Calcular fecha**: Convierte fechas relativas ("mañana", "próximo miércoles") a fecha exacta.
-2. **Consultar agenda** (para análisis): Trae datos de todos los doctores o uno específico. Úsala para preguntas analíticas: comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.
-3. **Ver agenda doctor** (para mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
-{activar_modo_doctor_desc}
+2. **Consultar agenda** (análisis): Trae datos de todos los doctores o uno específico. Úsala para preguntas analíticas: comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.
+3. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
 
 Reglas importantes:
 - IMPORTANTE: Cuando el usuario mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
@@ -59,81 +57,25 @@ Reglas importantes:
 - Sé breve pero completo. Los mensajes de WhatsApp deben ser concisos.
 - Usa formato WhatsApp: *negrita*, _cursiva_ cuando sea apropiado.
 - Para listas largas de doctores o citas, usa formato estructurado pero compacto.
-- REGLA CRÍTICA ANTI-ALUCINACIÓN: Para CUALQUIER pregunta sobre datos reales (agendas, citas, doctores, horarios, pacientes), SIEMPRE debes llamar a consultar_agenda para obtener información fresca. NUNCA respondas preguntas de datos usando información de mensajes anteriores en la conversación. Aunque ya hayas consultado la agenda antes, si el usuario hace una nueva pregunta sobre datos, vuelve a consultar. Ejemplo incorrecto: el usuario pregunta "¿y cuántas citas tiene en la tarde?" y tú respondes usando datos de una consulta anterior. Ejemplo correcto: vuelves a llamar a consultar_agenda para obtener los datos actualizados.
+- REGLA CRÍTICA ANTI-ALUCINACIÓN: Para CUALQUIER pregunta sobre datos reales (agendas, citas, doctores, horarios, pacientes), SIEMPRE debes llamar a la función correspondiente para obtener información fresca. NUNCA respondas usando datos de mensajes anteriores.
 
 El usuario con el que estás hablando se llama: {manager_name}"""
-
-# Descripción condicional de la tool activar_modo_doctor
-_ACTIVAR_DOCTOR_DESC = """3. **Activar modo doctor**: Si el usuario quiere acceder a sus funciones de médico (agenda personal, recados, etc.), activa el modo doctor."""
-_ACTIVAR_DOCTOR_DESC_EMPTY = ""
-
-
-# ──────────────────────────────────────────────
-# Tool: activar_modo_doctor
-# ──────────────────────────────────────────────
-
-_ACTIVAR_MODO_DOCTOR_TOOL = {
-    "type": "function",
-    "function": {
-        "name": "activar_modo_doctor",
-        "description": (
-            "Activa el modo doctor para que el usuario acceda a sus funciones "
-            "de médico (agenda personal, recados, etc.). Solo disponible para "
-            "usuarios con perfil híbrido médico-gerencia. "
-            "Úsala cuando el usuario quiera ver SU agenda personal, SUS recados, "
-            "o cualquier función que sea exclusiva de su rol como doctor."
-        ),
-        "parameters": {
-            "type": "object",
-            "properties": {},
-            "required": [],
-        },
-    },
-}
-
-# Key Redis para doctor mode (debe coincidir con manager.py)
-_DOCTOR_MODE_TTL = 7200
-
-
-def _doctor_mode_key(phone: str) -> str:
-    return f"manager:doctor_mode:{phone}"
-
-
-async def _handle_activar_modo_doctor(user, phone: str, arguments: Dict[str, Any]) -> str:
-    """Activa el modo doctor para usuarios con perfil híbrido."""
-    role = getattr(user, "role", "")
-    if role.lower() != "medico_gerencia":
-        return "Esta función no está disponible para tu perfil. Solo usuarios con rol médico-gerencia pueden activar el modo doctor."
-
-    await redis_svc.set(_doctor_mode_key(phone), "1", ttl=_DOCTOR_MODE_TTL)
-    return (
-        "Modo doctor activado. A partir del próximo mensaje, el usuario "
-        "tendrá acceso a sus funciones de médico (agenda personal, recados, etc.). "
-        "Informa al usuario que el modo doctor está activo y que puede escribir "
-        "'menu' para volver a gerencia."
-    )
-
 
 # ──────────────────────────────────────────────
 # Tools y handlers
 # ──────────────────────────────────────────────
 
-# Base tools (siempre disponibles)
-_BASE_TOOLS = [
+_TOOLS = [
     tool_shared.TOOL_DEFINITION,
     tool_agenda_mgr.TOOL_DEFINITION,
     tool_ver_agenda.TOOL_DEFINITION,
 ]
 
-_BASE_HANDLERS = {
+_TOOL_HANDLERS = {
     "calcular_fecha": tool_shared.handle,
     "consultar_agenda": tool_agenda_mgr.handle,
     "ver_agenda_doctor": tool_ver_agenda.handle,
 }
-
-# Tools extendidas (para perfil híbrido: incluye activar_modo_doctor)
-_HYBRID_TOOLS = _BASE_TOOLS + [_ACTIVAR_MODO_DOCTOR_TOOL]
-_HYBRID_HANDLERS = {**_BASE_HANDLERS, "activar_modo_doctor": _handle_activar_modo_doctor}
 
 
 # ──────────────────────────────────────────────
@@ -154,30 +96,21 @@ def _build_prompt_context(user) -> Dict[str, str]:
     ]
     dia_semana = _DIAS_SEMANA[now.weekday()]
 
-    # Determinar si el usuario tiene perfil híbrido
-    role = getattr(user, "role", "")
-    es_hibrido = role.lower() == "medico_gerencia"
-
     return {
         "manager_name": manager_name,
         "fecha_actual": fecha_actual,
         "dia_semana": dia_semana,
-        "activar_modo_doctor_desc": _ACTIVAR_DOCTOR_DESC if es_hibrido else _ACTIVAR_DOCTOR_DESC_EMPTY,
     }
 
 
 # ──────────────────────────────────────────────
 # Auto-registro
-#
-# Nota: registramos con tools extendidas (incluye activar_modo_doctor).
-# El prompt context builder inyecta/oculta la descripción según el perfil.
-# Si el LLM llama activar_modo_doctor sin ser híbrido, el handler rechaza.
 # ──────────────────────────────────────────────
 
 register_llm_config(RoleLLMConfig(
     role_name="gerencia",
     system_prompt_template=_SYSTEM_PROMPT,
-    tools=_HYBRID_TOOLS,
-    tool_handlers=_HYBRID_HANDLERS,
+    tools=_TOOLS,
+    tool_handlers=_TOOL_HANDLERS,
     prompt_context_builder=_build_prompt_context,
 ))
