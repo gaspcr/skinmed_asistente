@@ -199,6 +199,16 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
         len(doctors),
         {name: len(citas) for name, citas in doctors.items()},
     )
+    
+    # Obtener dias bloqueados
+    dias_bloqueados = await FileMakerService.get_dias_bloqueados(filemaker_date)
+    bloqueados_dict = {}
+    if dias_bloqueados:
+        for bloqueado in dias_bloqueados:
+            nombre = bloqueado.get("fieldData", {}).get("diasbloqueados_RRHH::Nombre Lista", "").strip()
+            observacion = bloqueado.get("fieldData", {}).get("Observación", "Sin motivo especificado").strip()
+            if nombre:
+                bloqueados_dict[nombre] = observacion
 
     # Aplicar filtro de doctor si se especificó
     if filtro_doctor:
@@ -206,25 +216,38 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
             name: citas for name, citas in doctors.items()
             if _match_doctor(name, filtro_doctor)
         }
+        filtered_bloqueados = {
+            name: obs for name, obs in bloqueados_dict.items()
+            if _match_doctor(name, filtro_doctor)
+        }
+        
         logger.info(
-            "[AGENDA_MGR] Filtro doctor='%s': %d match(es) de %d",
-            filtro_doctor, len(filtered), len(doctors),
+            "[AGENDA_MGR] Filtro doctor='%s': %d match(es) agenda, %d match(es) bloqueados",
+            filtro_doctor, len(filtered), len(filtered_bloqueados),
         )
-        if not filtered:
+        if not filtered and not filtered_bloqueados:
             # Sugerir doctores similares
-            all_names = list(doctors.keys())
+            all_names = list(set(list(doctors.keys()) + list(bloqueados_dict.keys())))
             return (
                 f"No se encontró un doctor que coincida con '{filtro_doctor}' "
                 f"en la agenda del {fecha_display}.\n"
-                f"Doctores disponibles: {', '.join(all_names)}"
+                f"Doctores disponibles/bloqueados: {', '.join(sorted(all_names))}"
             )
         doctors = filtered
+        bloqueados_dict = filtered_bloqueados
 
     # Formatear resultado
     if solo_resumen:
         result = _formatear_resumen(doctors, fecha_display)
     else:
         result = _formatear_detalle(doctors, fecha_display)
+        
+    # Añadir sección de bloqueados si hay
+    if bloqueados_dict:
+        result += "\n\nDoctores con agenda bloqueada este día:\n"
+        for nombre, obs in bloqueados_dict.items():
+            obs_clean = obs.replace("\r", " ").replace("\n", " ").strip()
+            result += f"- {nombre}: {obs_clean}\n"
 
     logger.info(
         "[AGENDA_MGR] Resultado (%d chars): %s",

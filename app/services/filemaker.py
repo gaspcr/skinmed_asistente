@@ -246,6 +246,42 @@ class FileMakerService:
         except Exception as e:
             logger.error("Error inesperado al obtener agenda general: %s", e)
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+    @staticmethod
+    async def get_dias_bloqueados(date: str = None) -> list:
+        """Obtiene dias bloqueados de TODOS los doctores para una fecha dada."""
+        settings = get_settings()
+        tz = pytz.timezone("America/Santiago")
+        today_str = date if date else datetime.now(tz).strftime("%m-%d-%Y")
+
+        query = {
+            "query": [
+                {
+                    "Fecha": today_str,
+                }
+            ],
+            "limit": 500
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(settings.FM_DIAS_BLOQUEADOS_LAYOUT, query)
+            return await FileMakerService._parsear_respuesta_find(resp, "get_dias_bloqueados")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker get_dias_bloqueados",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al obtener dias bloqueados: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
 
     @staticmethod
     async def get_recados(doctor_id: str) -> list:

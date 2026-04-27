@@ -257,8 +257,20 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
         await _save_history(phone, history)
 
         # Verificar si una tool ya envió el mensaje completo (ej: ver_agenda_doctor)
-        # En ese caso el LLM no debe enviar nada adicional
+        # Revisamos si la string [AGENDA_ENVIADA] está en final_content o en el resultado de la tool
+        agenda_enviada = False
         if final_content and "[AGENDA_ENVIADA]" in final_content:
+            agenda_enviada = True
+        else:
+            # Buscar en los mensajes desde la última interacción del usuario
+            for msg in reversed(history):
+                if msg.get("role") == "user":
+                    break
+                if msg.get("role") == "tool" and "[AGENDA_ENVIADA]" in str(msg.get("content", "")):
+                    agenda_enviada = True
+                    break
+
+        if agenda_enviada:
             logger.info(
                 "[LLM_ENGINE] Tool ya envió el mensaje completo para %s — suprimiendo respuesta del LLM",
                 phone,

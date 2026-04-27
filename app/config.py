@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     FM_RECADOS_LAYOUT: str = Field(default="ListadoDeRecados_dapi", description="Layout de recados en FileMaker")
     FM_RECADOS_CREATE_LAYOUT: str = Field(default="T_T500_Recados", description="Layout para crear recados en FileMaker")
     FM_PACIENTES_LAYOUT: str = Field(default="ListadoPacientes_dapi", description="Layout de pacientes en FileMaker")
+    FM_DIAS_BLOQUEADOS_LAYOUT: str = Field(default="ListadoDiasBloqueadosDoctores_dapi", description="Layout de dias bloqueados en FileMaker")
 
     # --- WhatsApp ---
     WSP_TOKEN: str = Field(description="Token de WhatsApp Business API")

@@ -98,6 +98,35 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
         filemaker_date = now.strftime("%m-%d-%Y")
         fecha_display = now.strftime("%d-%m-%Y")
 
+    # Verificar días bloqueados primero
+    dias_bloqueados = await FileMakerService.get_dias_bloqueados(filemaker_date)
+    doctor_bloqueado = None
+    
+    if dias_bloqueados:
+        for bloqueado in dias_bloqueados:
+            nombre = bloqueado.get("fieldData", {}).get("diasbloqueados_RRHH::Nombre Lista", "")
+            if _match_doctor(nombre, filtro_doctor):
+                doctor_bloqueado = bloqueado
+                break
+                
+    if doctor_bloqueado:
+        nombre_doc = doctor_bloqueado.get("fieldData", {}).get("diasbloqueados_RRHH::Nombre Lista", "").strip()
+        observacion = doctor_bloqueado.get("fieldData", {}).get("Observación", "Sin motivo especificado").strip()
+        
+        logger.info(
+            "[VER_AGENDA] Doctor '%s' tiene la agenda bloqueada el %s: %s",
+            nombre_doc, fecha_display, observacion
+        )
+        
+        mensaje_final = f"*Agenda de {nombre_doc}* — {fecha_display}\n\nEl doctor no está disponible este día.\nMotivo: {observacion}"
+        await WhatsAppService.send_message(phone, mensaje_final)
+        
+        return (
+            f"[AGENDA_ENVIADA] La agenda de {nombre_doc} para {fecha_display} está bloqueada. "
+            f"El motivo ({observacion}) fue enviado al usuario correctamente. "
+            f"NO envíes ningún mensaje adicional."
+        )
+
     # Obtener agenda completa del día
     all_data = await FileMakerService.get_agenda_all_doctors(filemaker_date)
 
