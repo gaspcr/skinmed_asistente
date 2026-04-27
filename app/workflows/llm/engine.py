@@ -166,6 +166,10 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
 
     # Agregar mensaje del usuario
     user_msg = {"role": "user", "content": message_text}
+    logger.info(
+        "[LLM_DEBUG] Mensaje usuario [%s] para %s: %s",
+        role, phone, message_text,
+    )
     history.append(user_msg)
 
     # Construir mensajes completos (system + history)

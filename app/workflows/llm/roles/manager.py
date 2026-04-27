@@ -16,6 +16,7 @@ from app.services import redis as redis_svc
 from app.workflows.llm.config import RoleLLMConfig, register_llm_config
 from app.workflows.llm.tools import shared as tool_shared
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
+from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
 
 
 # ──────────────────────────────────────────────
@@ -40,15 +41,17 @@ Contexto operacional de la clínica:
 - "Toparse" o "coincidir": cuando el usuario pregunta "¿en qué horario se topan el Dr. X y el Dr. Y?", se refiere a las horas en las que AMBOS doctores tienen citas programadas en un mismo rango horario. El criterio TRUE de tope está dado únicamente por el rango horario de citas agendadas, el paciente que está atendiendo no influye en esta condición. Si se topan en más de una hora responder el rango horario de tope con hora inicial y hora final solamente. No es necesario que las horas de tope sean continuas para que sean consideradas como rango de tope, es decir, si el doctor A llega a las 10:00 y se va a las 17:00 y el doctor B llega a las 13:00 y se va a las 15:00; TIENEN tope horario a pesar de que en las horas entre medio no hayan pacientes simultáneamente.
 Tienes acceso a las siguientes funciones:
 1. **Calcular fecha**: Convierte fechas relativas ("mañana", "próximo miércoles") a fecha exacta.
-2. **Consultar agenda**: Consultar las agendas de todos los doctores o de uno específico para un día dado. Puedes pedir solo el resumen (nombres + Nº citas) o el detalle completo.
+2. **Consultar agenda** (para análisis): Trae datos de todos los doctores o uno específico. Úsala para preguntas analíticas: comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.
+3. **Ver agenda doctor** (para mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
 {activar_modo_doctor_desc}
 
 Reglas importantes:
 - IMPORTANTE: Cuando el usuario mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
-- Cuando te pregunten sobre agendas, doctores, citas o pacientes, usa la función consultar_agenda.
-- Para preguntas generales ("¿qué doctores vienen hoy?"), usa solo_resumen=true.
-- Para preguntas específicas ("¿qué citas tiene la Dra. X?"), usa el filtro doctor.
-- Para buscar un doctor específico usa su apellido como filtro (ej: "Ramirez" para "Dra. Claudia Ramirez").
+- Cuando te pregunten sobre agendas, doctores, citas o pacientes para análisis (comparar, calcular, filtrar), usa consultar_agenda.
+- Cuando el usuario pida VER o mostrar la agenda de un doctor específico ("dame la agenda de X", "muéstrame la agenda de Y"), usa ver_agenda_doctor — esta envía el formato oficial con glosario directamente al usuario.
+- Para preguntas generales ("¿qué doctores vienen hoy?"), usa consultar_agenda con solo_resumen=true.
+- Para análisis específico de un doctor ("¿cuántas citas tiene X en la tarde?", "¿a qué hora entra Y?"), usa consultar_agenda con el filtro doctor.
+- Para buscar un doctor específico usa su apellido como filtro (ej: "Fernanda" para "Dra. Fernanda Cuca R").
 - Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario te pide realizar una acción concreta que NO puedes hacer con tus funciones. Saludos, preguntas generales y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
@@ -119,11 +122,13 @@ async def _handle_activar_modo_doctor(user, phone: str, arguments: Dict[str, Any
 _BASE_TOOLS = [
     tool_shared.TOOL_DEFINITION,
     tool_agenda_mgr.TOOL_DEFINITION,
+    tool_ver_agenda.TOOL_DEFINITION,
 ]
 
 _BASE_HANDLERS = {
     "calcular_fecha": tool_shared.handle,
     "consultar_agenda": tool_agenda_mgr.handle,
+    "ver_agenda_doctor": tool_ver_agenda.handle,
 }
 
 # Tools extendidas (para perfil híbrido: incluye activar_modo_doctor)
