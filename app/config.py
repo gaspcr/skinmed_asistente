@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     # --- LLM ---
     LLM_MODE_ENABLED: bool = Field(default=False, description="Habilitar modo LLM globalmente")
     OPENAI_API_KEY: str = Field(default="", description="API key de OpenAI para GPT-4o-mini")
-    OPENAI_MODEL: str = Field(default="gpt-5.4-mini", description="Modelo de OpenAI a utilizar")
+    OPENAI_MODEL: str = Field(default="gpt-5.4", description="Modelo de OpenAI a utilizar")
 
     # Fallback: roles que caen a legacy cuando el LLM falla (CSV: "medico,gerencia")
     LLM_LEGACY_FALLBACK_ROLES: str = Field(
