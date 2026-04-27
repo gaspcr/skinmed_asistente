@@ -256,6 +256,15 @@ async def process_message(user, phone: str, message_text: str, role: str) -> str
         history.append({"role": "assistant", "content": final_content})
         await _save_history(phone, history)
 
+        # Verificar si una tool ya envió el mensaje completo (ej: ver_agenda_doctor)
+        # En ese caso el LLM no debe enviar nada adicional
+        if final_content and "[AGENDA_ENVIADA]" in final_content:
+            logger.info(
+                "[LLM_ENGINE] Tool ya envió el mensaje completo para %s — suprimiendo respuesta del LLM",
+                phone,
+            )
+            return "OK"
+
         # Enviar respuesta al usuario
         if final_content:
             logger.info(

@@ -140,32 +140,32 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
         doctor_name, fecha_display, len(doctor_data),
     )
 
-    # Formatear con el AgendaFormatter (igual que el legacy del doctor)
-    # El header del formatter incluye "Hola Dr(a). X" — para gerencia usamos
-    # el nombre directo sin saludo personal
-    header_name = doctor_name
-    formatted_msg, glossary = AgendaFormatter.format(doctor_data, header_name)
+    # Formatear con el AgendaFormatter
+    formatted_msg, glossary = AgendaFormatter.format(doctor_data, doctor_name)
 
-    # Reemplazar el saludo personal del formatter por uno más neutro para gerencia
-    formatted_msg = formatted_msg.replace(
-        f"*Hola Dr(a). {header_name}*\n",
-        f"*Agenda de {header_name}* — {fecha_display}\n",
-    )
+    # Construir un único mensaje: header propio + cuerpo de citas + glosario
+    # El formatter devuelve "Hola Dr(a). X\nAgenda para día solicitado:\n\nHH:MM..."
+    # Eliminamos el header del formatter y usamos el nuestro
+    cuerpo = formatted_msg
+    for prefijo in [
+        f"*Hola Dr(a). {doctor_name}*\nAgenda para día solicitado:\n\n",
+        f"*Hola Dr(a). {doctor_name}*\nNo tienes citas agendadas día solicitado.",
+    ]:
+        if cuerpo.startswith(prefijo):
+            cuerpo = cuerpo[len(prefijo):]
+            break
 
-    # Enviar agenda formateada por WhatsApp
-    await WhatsAppService.send_message(phone, formatted_msg)
+    mensaje_final = f"*Agenda de {doctor_name}* — {fecha_display}\n\n{cuerpo.strip()}"
     if glossary:
-        await WhatsAppService.send_message(phone, f"*Glosario:*\n{glossary}")
+        mensaje_final += f"\n\n*Glosario:*\n{glossary}"
 
-    # Retornar resumen breve al LLM
-    n_citas = len([
-        r for r in doctor_data
-        if r["fieldData"].get("Tipo") not in _IGNORAR_TIPO
-        and r["fieldData"].get("Actividad", "").upper() not in _IGNORAR_ACTIVIDAD
-        and r["fieldData"].get("Hora", "00:00:00") != "00:00:00"
-    ])
+    await WhatsAppService.send_message(phone, mensaje_final)
+
+    # Indicar al LLM que NO envíe nada más — la agenda es la respuesta completa
     return (
-        f"Agenda de {doctor_name} para {fecha_display} enviada ({n_citas} cita(s)). "
-        f"Ya fue enviada por WhatsApp con su glosario. "
-        f"NO repitas el contenido de la agenda. Solo agrega un breve comentario y pregunta si necesita algo más."
+        f"[AGENDA_ENVIADA] Agenda de {doctor_name} para {fecha_display} enviada correctamente. "
+        f"El mensaje ya incluye las citas y el glosario. "
+        f"NO envíes ningún mensaje adicional. NO repitas la agenda. NO preguntes si necesita algo más. "
+        f"Tu turno ha terminado con esta tool call."
     )
+
