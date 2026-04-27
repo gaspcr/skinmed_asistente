@@ -161,11 +161,9 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
 
     await WhatsAppService.send_message(phone, mensaje_final)
 
-    # Indicar al LLM que NO envíe nada más — la agenda es la respuesta completa
     return (
         f"[AGENDA_ENVIADA] Agenda de {doctor_name} para {fecha_display} enviada correctamente. "
         f"El mensaje ya incluye las citas y el glosario. "
-        f"NO envíes ningún mensaje adicional. NO repitas la agenda. NO preguntes si necesita algo más. "
-        f"Tu turno ha terminado con esta tool call."
+        f"NO envíes ningún mensaje adicional. NO repitas la agenda."
     )
 
