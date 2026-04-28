@@ -111,14 +111,14 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
                 
     if doctor_bloqueado:
         nombre_doc = doctor_bloqueado.get("fieldData", {}).get("diasbloqueados_RRHH::Nombre Lista", "").strip()
-        observacion = doctor_bloqueado.get("fieldData", {}).get("Observación", "Sin motivo especificado").strip()
+        observacion = doctor_bloqueado.get("fieldData", {}).get("Observación", "Sin motivo especificado").split('\r')
         
         logger.info(
             "[VER_AGENDA] Doctor '%s' tiene la agenda bloqueada el %s: %s",
             nombre_doc, fecha_display, observacion
         )
         
-        mensaje_final = f"*Agenda de {nombre_doc}* — {fecha_display}\n\nEl doctor no está disponible este día.\nMotivo: {observacion}"
+        mensaje_final = f"*Agenda de {nombre_doc}* — {fecha_display}\n\n El doctor no está disponible este día.\nMotivo: {observacion[2]}"
         await WhatsAppService.send_message(phone, mensaje_final)
         
         return (
