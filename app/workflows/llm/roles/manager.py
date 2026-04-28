@@ -16,7 +16,6 @@ from app.workflows.llm.config import RoleLLMConfig, register_llm_config
 from app.workflows.llm.tools import shared as tool_shared
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
 from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
-from app.workflows.llm.tools import knowledge as tool_knowledge
 
 
 # ──────────────────────────────────────────────
@@ -43,7 +42,6 @@ Tienes acceso a las siguientes funciones:
 1. **Calcular fecha**: Convierte fechas relativas ("mañana", "próximo miércoles") a fecha exacta.
 2. **Consultar agenda** (análisis): Trae datos de todos los doctores o uno específico. Úsala para preguntas analíticas: comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.
 3. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
-4. **Consultar documentos**: Buscar información en los manuales, protocolos y folletos de la clínica.
 
 Reglas importantes:
 - IMPORTANTE: Cuando el usuario mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
@@ -52,8 +50,7 @@ Reglas importantes:
 - Para preguntas generales ("¿qué doctores vienen hoy?"), usa consultar_agenda con solo_resumen=true.
 - Para análisis específico de un doctor ("¿cuántas citas tiene X en la tarde?", "¿a qué hora entra Y?"), usa consultar_agenda con el filtro doctor.
 - Para buscar un doctor específico usa su apellido como filtro (ej: "Fernanda" para "Dra. Fernanda Cuca R").
-- IMPORTANTE: Cuando pregunten sobre temas médicos, folletos de pacientes, protocolos o información interna de la clínica, SIEMPRE usa la función consultar_documentos_clinica. Al responder usando esta información, SIEMPRE menciona explícitamente el nombre del "Documento" consultado.
-- Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades (agenda, ocupación, documentos médicos). Esto NO es un fallback.
+- Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario te pide realizar una acción concreta que NO puedes hacer con tus funciones. Saludos, preguntas generales y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
 - No inventes información. Solo reporta lo que devuelven las funciones.
@@ -72,14 +69,12 @@ _TOOLS = [
     tool_shared.TOOL_DEFINITION,
     tool_agenda_mgr.TOOL_DEFINITION,
     tool_ver_agenda.TOOL_DEFINITION,
-    tool_knowledge.TOOL_DEFINITION,
 ]
 
 _TOOL_HANDLERS = {
     "calcular_fecha": tool_shared.handle,
     "consultar_agenda": tool_agenda_mgr.handle,
     "ver_agenda_doctor": tool_ver_agenda.handle,
-    "consultar_documentos_clinica": tool_knowledge.handle,
 }
 
 

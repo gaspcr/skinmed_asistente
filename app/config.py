@@ -40,9 +40,6 @@ class Settings(BaseSettings):
 
     # --- Entorno ---
     ENVIRONMENT: str = Field(default="production", description="Entorno de ejecucion (development, staging, production)")
-    
-    # --- Base de Datos Vectorial ---
-    DATABASE_URL: str = Field(default="", description="URL de PostgreSQL (pgvector) inyectada por Railway")
 
     # --- Rate Limiting ---
     RATE_LIMIT_MAX: int = Field(default=30, description="Maximo de mensajes por ventana de rate limit")
