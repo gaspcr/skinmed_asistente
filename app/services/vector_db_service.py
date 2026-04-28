@@ -64,7 +64,7 @@ async def search_knowledge_base(query: str, top_k: int = 4) -> str:
             return "No encontré información relevante en los documentos de la clínica sobre tu consulta."
             
         # 3. Formatear la respuesta
-        formatted_results = "INFORMACIÓN DE LA CLÍNICA ENCONTRADA (Úsala para responder al doctor):\n\n"
+        formatted_results = "INFORMACIÓN DE LA CLÍNICA ENCONTRADA (Úsala para responder al usuario):\n\n"
         for idx, row in enumerate(results):
             nombre, categoria, content, similarity = row
             # Solo incluimos resultados con un mínimo de relevancia (ej. > 0.3)
@@ -75,7 +75,7 @@ async def search_knowledge_base(query: str, top_k: int = 4) -> str:
             formatted_results += f"Documento: {nombre} | Categoría: {categoria}\n"
             formatted_results += f"Contenido:\n{content}\n\n"
             
-        if formatted_results == "INFORMACIÓN DE LA CLÍNICA ENCONTRADA (Úsala para responder al doctor):\n\n":
+        if formatted_results == "INFORMACIÓN DE LA CLÍNICA ENCONTRADA (Úsala para responder al usuario):\n\n":
              return "Se encontraron documentos, pero no fueron lo suficientemente relevantes para responder tu consulta."
              
         return formatted_results
