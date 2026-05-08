@@ -112,7 +112,7 @@ class ManagerWorkflow(WorkflowHandler):
                 # Caer al flujo legacy abajo
             else:
                 logger.info("[MANAGER] Procesando con LLM para %s", phone)
-                result = await llm_engine.process_message(user, phone, message_text, role="gerencia")
+                result = await llm_engine.process_message(user, phone, message_text, role=role)
                 if result == "FALLBACK" and settings.llm_has_legacy_fallback(role):
                     logger.info("[MANAGER] LLM señaló fallback, cambiando a legacy para %s", phone)
                     await llm_engine.set_legacy_fallback(phone)
