@@ -25,6 +25,7 @@ from app.workflows.llm.tools import agenda as tool_agenda
 from app.workflows.llm.tools import recados as tool_recados
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
 from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
+from app.workflows.llm.tools import shopify as tool_shopify
 
 
 # ──────────────────────────────────────────────
@@ -61,6 +62,7 @@ Tienes acceso a las siguientes funciones:
 *Funciones de gerencia (para la clínica):*
 5. **Consultar agenda** (análisis): Datos de todos los doctores o uno específico para preguntas analíticas (comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.)
 6. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de cualquier doctor con glosario.
+7. **Consultar tienda**: Busca productos de la tienda online (stock, precio, marca, descripción).
 
 Categorías de recados disponibles:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -74,6 +76,7 @@ Reglas importantes:
 - "La agenda de X" o "agenda de la clínica" → usa consultar_agenda o ver_agenda_doctor.
 - Para VER la agenda formateada de un doctor específico → usa ver_agenda_doctor.
 - Para ANALIZAR datos de agendas → usa consultar_agenda.
+- Cuando pregunten sobre productos de la tienda (precios, stock, marcas como SkinCeuticals, CeraVe, La Roche-Posay, etc.), usa la función consultar_producto_tienda.
 - Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario pide una acción concreta que no puedes hacer. Saludos y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
@@ -94,15 +97,17 @@ _TOOLS = [
     tool_recados.PUBLICAR_RECADO_TOOL, # publicar_recado
     tool_agenda_mgr.TOOL_DEFINITION,   # consultar_agenda (gerencia - análisis)
     tool_ver_agenda.TOOL_DEFINITION,   # ver_agenda_doctor (gerencia - mostrar)
+    tool_shopify.TOOL_DEFINITION,      # consultar_producto_tienda
 ]
 
 _TOOL_HANDLERS = {
-    "calcular_fecha":    tool_shared.handle,
-    "revisar_agenda":    tool_agenda.handle,
-    "revisar_recados":   tool_recados.handle_revisar,
-    "publicar_recado":   tool_recados.handle_publicar,
-    "consultar_agenda":  tool_agenda_mgr.handle,
-    "ver_agenda_doctor": tool_ver_agenda.handle,
+    "calcular_fecha":            tool_shared.handle,
+    "revisar_agenda":            tool_agenda.handle,
+    "revisar_recados":           tool_recados.handle_revisar,
+    "publicar_recado":           tool_recados.handle_publicar,
+    "consultar_agenda":          tool_agenda_mgr.handle,
+    "ver_agenda_doctor":         tool_ver_agenda.handle,
+    "consultar_producto_tienda": tool_shopify.handle,
 }
 
 

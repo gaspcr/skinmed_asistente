@@ -41,6 +41,10 @@ class Settings(BaseSettings):
     # --- Entorno ---
     ENVIRONMENT: str = Field(default="production", description="Entorno de ejecucion (development, staging, production)")
 
+    # --- Shopify ---
+    SHOPIFY_STORE_DOMAIN: str = Field(default="", description="Dominio de la tienda Shopify (ej. skinmed.myshopify.com)")
+    SHOPIFY_ACCESS_TOKEN: str = Field(default="", description="Token de la Custom App de Shopify")
+
     # --- Rate Limiting ---
     RATE_LIMIT_MAX: int = Field(default=30, description="Maximo de mensajes por ventana de rate limit")
     RATE_LIMIT_WINDOW: int = Field(default=60, description="Ventana de rate limit en segundos")
