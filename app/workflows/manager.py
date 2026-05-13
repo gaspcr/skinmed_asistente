@@ -68,7 +68,7 @@ class ManagerWorkflow(WorkflowHandler):
     async def handle_text(self, user, phone: str, message_text: str = ""):
         texto = message_text.strip().lower()
 
-        # Cancelación de actualización de precios: "cancelar XXXXXXXX"
+        # Cancelación de job programado: "cancelar XXXXXXXX"
         if texto.startswith("cancelar "):
             from app.services import price_scheduler
             job_id = message_text.strip().split(" ", 1)[1].strip()
@@ -82,7 +82,7 @@ class ManagerWorkflow(WorkflowHandler):
                 )
             return
 
-        # "salir" siempre termina TODO, sin importar donde estemos
+        # "salir" termina TODO sin importar dónde estemos
         if texto == "salir":
             await workflow_state.clear_state(phone)
             await _clear_doctor_mode(phone)
@@ -94,23 +94,34 @@ class ManagerWorkflow(WorkflowHandler):
             )
             return
 
+        # ── Pasos de actualización de precios: siempre ANTES del LLM ──
+        step = await workflow_state.get_step(phone)
+        if step == "waiting_for_csv":
+            await WhatsAppService.send_message(
+                phone,
+                "Estoy esperando el archivo CSV. Por favor envíalo para continuar, "
+                "o escribe *salir* para cancelar."
+            )
+            return
+        elif step == "waiting_for_price_schedule_time":
+            await self._handle_price_schedule_time(user, phone, message_text)
+            return
+        elif step == "waiting_for_price_confirmation":
+            await self._handle_price_confirmation(user, phone, message_text)
+            return
+
         # Verificar si estamos en modo doctor
         in_doctor_mode = await _is_doctor_mode(phone)
 
         if in_doctor_mode:
-            # "menu" desde modo doctor -> volver al menu de gerencia
             if texto == "menu":
                 await workflow_state.clear_state(phone)
                 await _clear_doctor_mode(phone)
                 await llm_engine.clear_llm_state(phone)
                 await self._send_menu(user, phone)
                 return
-
-            # Delegar todo lo demás al workflow de doctor
             await self._doctor_workflow.handle_text(user, phone, message_text)
             return
-
-        # --- Flujo normal de gerencia ---
 
         if texto == "menu":
             await workflow_state.clear_state(phone)
@@ -123,31 +134,24 @@ class ManagerWorkflow(WorkflowHandler):
         role = getattr(user, "role", "gerencia")
 
         if settings.LLM_MODE_ENABLED and not await llm_engine.is_legacy_fallback(phone):
-            # Verificar modo mantención
             if settings.llm_is_in_maintenance(role, phone):
                 logger.info("[MANAGER] LLM en mantención para %s (rol=%s)", phone, role)
-                # Caer al flujo legacy abajo
             else:
                 logger.info("[MANAGER] Procesando con LLM para %s", phone)
                 result = await llm_engine.process_message(user, phone, message_text, role=role)
                 if result == "FALLBACK" and settings.llm_has_legacy_fallback(role):
                     logger.info("[MANAGER] LLM señaló fallback, cambiando a legacy para %s", phone)
                     await llm_engine.set_legacy_fallback(phone)
-                    # Caer al flujo legacy abajo
                 else:
-                    return  # LLM manejó el mensaje exitosamente
+                    return
 
-        # Verificar flujo multi-paso
-        step = await workflow_state.get_step(phone)
+        # ── Flujo multi-paso legacy ──
         if step:
             if step == "waiting_for_doctor_selection":
                 await self._handle_doctor_selection(user, phone, message_text)
                 return
             elif step == "waiting_for_agenda_date":
                 await self._handle_date_input(user, phone, message_text)
-                return
-            elif step == "waiting_for_price_schedule_time":
-                await self._handle_price_schedule_time(user, phone, message_text)
                 return
             elif step == "waiting_for_continue":
                 if texto in ["si", "sí", "s"]:
@@ -162,19 +166,16 @@ class ManagerWorkflow(WorkflowHandler):
                     )
                 return
 
-        # Opciones del menu principal
+        # Opciones del menú principal
         if texto == "1":
             await self._show_doctors_agenda(user, phone)
-            return
         elif texto == "2":
             await workflow_state.set_state(phone, "waiting_for_agenda_date")
             await WhatsAppService.send_message(
                 phone,
                 "Indica la fecha que deseas consultar en formato *dd-mm-yy*\n\nEjemplo: 05-03-26"
             )
-            return
         elif texto == "3":
-            # Activar modo doctor
             if user.role and user.role.lower() == "medico_gerencia":
                 await workflow_state.clear_state(phone)
                 await _set_doctor_mode(phone)
@@ -184,10 +185,8 @@ class ManagerWorkflow(WorkflowHandler):
                     phone,
                     "Esta opción no está disponible para tu perfil."
                 )
-            return
-
-        # Cualquier otro texto: enviar menu
-        await self._send_menu(user, phone)
+        else:
+            await self._send_menu(user, phone)
 
     async def handle_button(self, user, phone: str, button_title: str, background_tasks: BackgroundTasks):
         # Si estamos en modo doctor, delegar botones
@@ -409,29 +408,61 @@ class ManagerWorkflow(WorkflowHandler):
         )
 
     async def _handle_price_schedule_time(self, user, phone: str, message_text: str):
-        """Procesa la hora de ejecución para la actualización masiva de precios."""
-        from app.services import price_scheduler
+        """Usa mini-LLM para extraer la fecha/hora en lenguaje natural y pide confirmación."""
+        from app.services import llm_service
 
         tz_chile = pytz.timezone("America/Santiago")
-        texto = message_text.strip()
+        now = datetime.now(tz_chile)
+        dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+
+        system_prompt = (
+            f"Eres un extractor de fechas para un sistema de programación de tareas en Chile.\n"
+            f"Hoy es {now.strftime('%Y-%m-%d')} ({dias[now.weekday()]}), "
+            f"hora actual: {now.strftime('%H:%M')} hora Chile.\n"
+            f"Extrae la fecha y hora del mensaje del usuario y responde ÚNICAMENTE en formato: YYYY-MM-DD HH:MM\n"
+            f"Si no puedes extraer una fecha válida, responde solo: ERROR"
+        )
 
         try:
-            run_at_naive = datetime.strptime(texto, "%Y-%m-%d %H:%M")
+            response = await llm_service.chat_completion(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": message_text},
+                ],
+                temperature=0.0,
+            )
+            resultado = (response.get("content") or "ERROR").strip()
+        except Exception as e:
+            logger.error("[MANAGER] Error en mini-LLM para fecha: %s", e)
+            await WhatsAppService.send_message(
+                phone,
+                "No pude procesar la fecha. Por favor usa el formato:\n"
+                "*YYYY-MM-DD HH:MM*\nEjemplo: *2026-05-20 20:00*"
+            )
+            return
+
+        if resultado == "ERROR":
+            await WhatsAppService.send_message(
+                phone,
+                "No entendí la fecha y hora. Por favor especifícala.\n\n"
+                "Ejemplos:\n• *2026-05-20 20:00*\n• *mañana a las 8pm*\n• *el lunes a las 20:00*"
+            )
+            return
+
+        try:
+            run_at_naive = datetime.strptime(resultado, "%Y-%m-%d %H:%M")
             run_at = tz_chile.localize(run_at_naive)
         except ValueError:
             await WhatsAppService.send_message(
                 phone,
-                "Formato inválido.\n\n"
-                "Usa: *YYYY-MM-DD HH:MM*\n"
-                "Ejemplo: *2026-05-20 20:00*"
+                "Ocurrió un error procesando la fecha. Por favor intenta de nuevo."
             )
             return
 
-        now = datetime.now(tz_chile)
         if run_at <= now + timedelta(minutes=5):
             await WhatsAppService.send_message(
                 phone,
-                "La hora debe ser al menos 5 minutos en el futuro."
+                "La hora debe ser al menos 5 minutos en el futuro. Por favor elige otra hora."
             )
             return
 
@@ -440,6 +471,62 @@ class ManagerWorkflow(WorkflowHandler):
 
         if not variantes:
             await WhatsAppService.send_message(phone, "Sesión expirada. Por favor envía el CSV de nuevo.")
+            await workflow_state.clear_state(phone)
+            return
+
+        # Guardar fecha y pedir confirmación
+        await workflow_state.set_state(
+            phone,
+            "waiting_for_price_confirmation",
+            data={"variantes": variantes, "run_at": run_at.isoformat()},
+        )
+
+        fecha_str = run_at.strftime("%d/%m/%Y a las %H:%M")
+        await WhatsAppService.send_message(
+            phone,
+            f"*¿Confirmas la actualización de precios?*\n\n"
+            f"📦 *{len(variantes)} variante(s)* a actualizar\n"
+            f"📅 *{fecha_str}* hora Chile\n\n"
+            f"Responde *sí* para confirmar o *no* para cancelar."
+        )
+
+    async def _handle_price_confirmation(self, user, phone: str, message_text: str):
+        """Confirma la actualización y programa el job en el scheduler."""
+        from app.services import price_scheduler
+
+        texto = message_text.strip().lower()
+
+        if texto not in ["si", "sí", "s", "no", "n"]:
+            await WhatsAppService.send_message(
+                phone,
+                "Por favor responde *sí* para confirmar o *no* para cancelar."
+            )
+            return
+
+        if texto in ["no", "n"]:
+            await workflow_state.clear_state(phone)
+            await WhatsAppService.send_message(
+                phone,
+                "Actualización cancelada. Cuando necesites algo, escríbeme."
+            )
+            return
+
+        state_data = await workflow_state.get_data(phone)
+        if not state_data:
+            await WhatsAppService.send_message(phone, "Sesión expirada. Por favor envía el CSV de nuevo.")
+            await workflow_state.clear_state(phone)
+            return
+
+        variantes = state_data.get("variantes", [])
+        run_at_iso = state_data.get("run_at", "")
+
+        try:
+            tz_chile = pytz.timezone("America/Santiago")
+            run_at = datetime.fromisoformat(run_at_iso)
+            if not run_at.tzinfo:
+                run_at = tz_chile.localize(run_at)
+        except Exception:
+            await WhatsAppService.send_message(phone, "Error interno. Por favor envía el CSV de nuevo.")
             await workflow_state.clear_state(phone)
             return
 
