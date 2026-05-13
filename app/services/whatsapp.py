@@ -121,3 +121,24 @@ class WhatsAppService:
             )
         except Exception as e:
             logger.error("Error al enviar template '%s' a %s: %s", template_name, to_phone, e)
+
+    @staticmethod
+    async def download_media(media_id: str) -> bytes:
+        """Descarga un archivo de media de WhatsApp y retorna sus bytes."""
+        settings = get_settings()
+        headers = {"Authorization": f"Bearer {settings.WSP_TOKEN}"}
+        client = http_svc.get_client()
+
+        # 1. Obtener la URL real del media
+        meta_url = f"https://graph.facebook.com/{settings.META_API_VERSION}/{media_id}"
+        resp = await client.get(meta_url, headers=headers, timeout=15.0)
+        resp.raise_for_status()
+        media_url = resp.json().get("url")
+        if not media_url:
+            raise ValueError(f"No se pudo obtener URL para media_id={media_id}")
+
+        # 2. Descargar el archivo
+        resp2 = await client.get(media_url, headers=headers, timeout=30.0)
+        resp2.raise_for_status()
+        logger.info("[WSP] download_media id=%s size=%d bytes", media_id, len(resp2.content))
+        return resp2.content

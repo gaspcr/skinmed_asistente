@@ -1,7 +1,10 @@
+import csv
+import io
 import logging
 import re
+import uuid
 from collections import OrderedDict
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 from fastapi import BackgroundTasks
@@ -64,6 +67,20 @@ class ManagerWorkflow(WorkflowHandler):
 
     async def handle_text(self, user, phone: str, message_text: str = ""):
         texto = message_text.strip().lower()
+
+        # Cancelación de actualización de precios: "cancelar XXXXXXXX"
+        if texto.startswith("cancelar "):
+            from app.services import price_scheduler
+            job_id = message_text.strip().split(" ", 1)[1].strip()
+            cancelado = await price_scheduler.cancel_price_update(job_id)
+            if cancelado:
+                await WhatsAppService.send_message(phone, f"✅ Actualización *{job_id}* cancelada.")
+            else:
+                await WhatsAppService.send_message(
+                    phone,
+                    f"No se encontró una actualización pendiente con ID *{job_id}*."
+                )
+            return
 
         # "salir" siempre termina TODO, sin importar donde estemos
         if texto == "salir":
@@ -128,6 +145,9 @@ class ManagerWorkflow(WorkflowHandler):
                 return
             elif step == "waiting_for_agenda_date":
                 await self._handle_date_input(user, phone, message_text)
+                return
+            elif step == "waiting_for_price_schedule_time":
+                await self._handle_price_schedule_time(user, phone, message_text)
                 return
             elif step == "waiting_for_continue":
                 if texto in ["si", "sí", "s"]:
@@ -295,6 +315,148 @@ class ManagerWorkflow(WorkflowHandler):
                 phone,
                 "No se pudo obtener la agenda. Intenta de nuevo en unos minutos."
             )
+
+    async def handle_document(self, user, phone: str, document):
+        """Recibe un CSV de Shopify para programar actualización masiva de precios."""
+        mime = getattr(document, "mime_type", "") or ""
+        filename = getattr(document, "filename", "") or ""
+
+        if mime != "text/csv" and not filename.lower().endswith(".csv"):
+            await WhatsAppService.send_message(
+                phone,
+                "Solo se aceptan archivos CSV (.csv) para actualización de precios.\n"
+                "Por favor envía el archivo exportado desde Shopify."
+            )
+            return
+
+        try:
+            content_bytes = await WhatsAppService.download_media(document.id)
+            content = content_bytes.decode("utf-8-sig")  # utf-8-sig maneja BOM de Excel/Shopify
+        except Exception as e:
+            logger.error("[MANAGER] Error descargando CSV de %s: %s", phone, e)
+            await WhatsAppService.send_message(
+                phone,
+                "No se pudo descargar el archivo. Intenta enviarlo de nuevo."
+            )
+            return
+
+        # Parsear CSV usando índices para tolerar headers con espacios extra
+        try:
+            lines = content.splitlines()
+            if not lines:
+                raise ValueError("Archivo vacío")
+
+            header_reader = csv.reader([lines[0]])
+            raw_headers = next(header_reader)
+            stripped_headers = [h.strip() for h in raw_headers]
+
+            sku_col = next((i for i, h in enumerate(stripped_headers) if h.lower() == "variant sku"), None)
+            price_col = next((i for i, h in enumerate(stripped_headers) if h.lower() == "variant price"), None)
+
+            if sku_col is None or price_col is None:
+                await WhatsAppService.send_message(
+                    phone,
+                    "El CSV no tiene las columnas requeridas.\n\n"
+                    "Se esperan: *Variant SKU* y *Variant Price*\n\n"
+                    "Usa el export de productos de Shopify."
+                )
+                return
+
+            variantes = []
+            data_reader = csv.reader(io.StringIO(content))
+            next(data_reader)  # Saltar encabezado
+
+            for row in data_reader:
+                if len(row) <= max(sku_col, price_col):
+                    continue
+                sku = row[sku_col].strip()
+                price = row[price_col].strip()
+                if not sku or not price:
+                    continue
+                try:
+                    float(price)
+                except ValueError:
+                    continue
+                variantes.append({"sku": sku, "price": price})
+
+        except Exception as e:
+            logger.error("[MANAGER] Error parseando CSV de %s: %s", phone, e)
+            await WhatsAppService.send_message(
+                phone,
+                "No se pudo leer el archivo CSV. Verifica que el formato sea correcto."
+            )
+            return
+
+        if not variantes:
+            await WhatsAppService.send_message(
+                phone,
+                "El CSV no contiene variantes válidas (SKU y precio requeridos)."
+            )
+            return
+
+        await workflow_state.set_state(
+            phone,
+            "waiting_for_price_schedule_time",
+            data={"variantes": variantes},
+        )
+        await WhatsAppService.send_message(
+            phone,
+            f"*CSV recibido* ✅\n\n"
+            f"Se encontraron *{len(variantes)} variante(s)* para actualizar.\n\n"
+            f"¿A qué hora quieres ejecutar la actualización? (hora Chile)\n"
+            f"Formato: *YYYY-MM-DD HH:MM*\n\n"
+            f"Ejemplo: *2026-05-20 20:00*"
+        )
+
+    async def _handle_price_schedule_time(self, user, phone: str, message_text: str):
+        """Procesa la hora de ejecución para la actualización masiva de precios."""
+        from app.services import price_scheduler
+
+        tz_chile = pytz.timezone("America/Santiago")
+        texto = message_text.strip()
+
+        try:
+            run_at_naive = datetime.strptime(texto, "%Y-%m-%d %H:%M")
+            run_at = tz_chile.localize(run_at_naive)
+        except ValueError:
+            await WhatsAppService.send_message(
+                phone,
+                "Formato inválido.\n\n"
+                "Usa: *YYYY-MM-DD HH:MM*\n"
+                "Ejemplo: *2026-05-20 20:00*"
+            )
+            return
+
+        now = datetime.now(tz_chile)
+        if run_at <= now + timedelta(minutes=5):
+            await WhatsAppService.send_message(
+                phone,
+                "La hora debe ser al menos 5 minutos en el futuro."
+            )
+            return
+
+        state_data = await workflow_state.get_data(phone)
+        variantes = state_data.get("variantes", []) if state_data else []
+
+        if not variantes:
+            await WhatsAppService.send_message(phone, "Sesión expirada. Por favor envía el CSV de nuevo.")
+            await workflow_state.clear_state(phone)
+            return
+
+        job_id = uuid.uuid4().hex[:8]
+        await price_scheduler.schedule_price_update(job_id, phone, variantes, run_at)
+        await workflow_state.clear_state(phone)
+
+        fecha_str = run_at.strftime("%d/%m/%Y a las %H:%M")
+        await WhatsAppService.send_message(
+            phone,
+            f"✅ *Actualización programada*\n\n"
+            f"📅 {fecha_str} hora Chile\n"
+            f"📦 {len(variantes)} variante(s)\n"
+            f"🔑 ID: *{job_id}*\n\n"
+            f"Te notificaré cuando se complete.\n"
+            f"Para cancelar escribe: *cancelar {job_id}*"
+        )
 
     async def _handle_doctor_selection(self, user, phone: str, message_text: str):
         """Procesa la seleccion de doctor por numero, o si/no para continuar"""

@@ -7,3 +7,4 @@ pydantic-settings==2.7.1
 pytz==2024.2
 python-dotenv==1.0.1
 python-json-logger==3.2.1
+apscheduler==3.10.4

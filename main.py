@@ -16,11 +16,12 @@ from app.exceptions import ServicioNoDisponibleError
 from app.workflows import doctor, manager, hybrid
 from app.workflows.role_registry import get_workflow_handler
 from app.workflows import session_timer
+from app.services import price_scheduler
 
 logger = logging.getLogger(__name__)
 
 # Tipos de mensaje soportados por el bot
-TIPOS_MENSAJE_SOPORTADOS = {"text", "interactive", "button"}
+TIPOS_MENSAJE_SOPORTADOS = {"text", "interactive", "button", "document"}
 
 
 @asynccontextmanager
@@ -32,11 +33,13 @@ async def lifespan(app: FastAPI):
     validate()
     await redis_svc.init(settings.REDIS_URL)
     await http_svc.init()
+    await price_scheduler.init_scheduler()
     logger.info("Servicios inicializados correctamente")
 
     yield
 
     # --- Shutdown ---
+    price_scheduler.shutdown_scheduler()
     await http_svc.close()
     await redis_svc.close()
     logger.info("Servicios cerrados correctamente")
@@ -206,6 +209,13 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
             btn_title = extract_button_title(msg)
             logger.info("[MAIN] Boton recibido de %s: '%s'", sender_phone, btn_title)
             await handler.handle_button(user, sender_phone, btn_title, background_tasks)
+
+        elif msg.type == "document":
+            logger.info("[MAIN] Documento recibido de %s: filename=%s mime=%s",
+                        sender_phone,
+                        getattr(msg.document, "filename", "?"),
+                        getattr(msg.document, "mime_type", "?"))
+            await handler.handle_document(user, sender_phone, msg.document)
 
     except ServicioNoDisponibleError as e:
         logger.error("Servicio externo no disponible: %s", e)
