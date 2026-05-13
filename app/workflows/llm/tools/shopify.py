@@ -55,6 +55,6 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
 
     logger.info("Shopify search solicitada por %s (%s): '%s'", user.name, phone, busqueda)
 
-    resultados = await shopify_service.buscar_productos(query=busqueda, limit=5)
+    resultados = await shopify_service.buscar_productos(query=busqueda)
 
     return resultados

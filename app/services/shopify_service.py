@@ -59,9 +59,10 @@ def _headers() -> Dict[str, str]:
 # Funciones públicas
 # ──────────────────────────────────────────────
 
-async def buscar_productos(query: str, limit: int = 5) -> str:
+async def buscar_productos(query: str, limit: int = 50) -> str:
     """
-    Busca productos en Shopify por título.
+    Busca productos en Shopify por marca (vendor), título o tags.
+    Prueba vendor primero — ideal para búsquedas por marca como 'SkinCeuticals'.
     Retorna un string formateado para el LLM.
     """
     settings = get_settings()
@@ -70,40 +71,58 @@ async def buscar_productos(query: str, limit: int = 5) -> str:
 
     client = http_svc.get_client()
     url = f"{_base_url()}/products.json"
-
-    params = {
-        "title": query,
-        "limit": limit,
-        "fields": "id,title,vendor,body_html,tags,variants,handle,status,published_at",
-    }
+    fields = "id,title,vendor,body_html,tags,variants,handle,status,published_at"
+    query_lower = query.lower()
+    products: List[Dict[str, Any]] = []
 
     try:
-        resp = await client.get(url, params=params, headers=_headers(), timeout=15.0)
+        # 1. Buscar por vendor (marca) — cubre "SkinCeuticals", "CeraVe", etc.
+        resp = await client.get(url, params={
+            "vendor": query, "limit": 250, "fields": fields,
+        }, headers=_headers(), timeout=15.0)
+        if resp.status_code == 200:
+            products = resp.json().get("products", [])
 
-        if resp.status_code != 200:
-            logger.error("Error Shopify API: HTTP %d — %s", resp.status_code, resp.text[:300])
-            return f"Error al consultar Shopify: HTTP {resp.status_code}"
-
-        data = resp.json()
-        products = data.get("products", [])
-
+        # 2. Si no hay resultados por vendor, buscar por título
         if not products:
-            # Intentar búsqueda más amplia filtrando manualmente
-            params_broad = {"limit": 50, "fields": "id,title,vendor,body_html,tags,variants,handle,status,published_at"}
-            resp2 = await client.get(url, params=params_broad, headers=_headers(), timeout=15.0)
-            if resp2.status_code == 200:
-                all_products = resp2.json().get("products", [])
-                query_lower = query.lower()
-                products = [
-                    p for p in all_products
-                    if query_lower in p.get("title", "").lower()
-                    or query_lower in p.get("vendor", "").lower()
-                    or query_lower in p.get("tags", "").lower()
-                    or any(query_lower in v.get("sku", "").lower() for v in p.get("variants", []))
-                ][:limit]
+            resp = await client.get(url, params={
+                "title": query, "limit": limit, "fields": fields,
+            }, headers=_headers(), timeout=15.0)
+            if resp.status_code == 200:
+                products = resp.json().get("products", [])
+
+        # 3. Fallback: paginar todo el catálogo y filtrar manualmente
+        if not products:
+            since_id = 0
+            all_products: List[Dict[str, Any]] = []
+            while True:
+                resp = await client.get(url, params={
+                    "limit": 250, "fields": fields, "since_id": since_id,
+                }, headers=_headers(), timeout=30.0)
+                if resp.status_code != 200:
+                    break
+                page = resp.json().get("products", [])
+                if not page:
+                    break
+                all_products.extend(page)
+                if len(page) < 250:
+                    break
+                since_id = page[-1]["id"]
+
+            products = [
+                p for p in all_products
+                if query_lower in p.get("title", "").lower()
+                or query_lower in p.get("vendor", "").lower()
+                or query_lower in p.get("tags", "").lower()
+                or any(query_lower in v.get("sku", "").lower() for v in p.get("variants", []))
+            ]
 
         if not products:
             return f"No se encontraron productos con el término '{query}' en la tienda."
+
+        # Limitar resultado final para no saturar el contexto del LLM
+        if len(products) > limit:
+            products = products[:limit]
 
         return _format_products(products)
 
