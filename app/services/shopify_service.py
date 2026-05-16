@@ -12,11 +12,15 @@ from typing import Any, Dict, List, Optional
 
 from app.config import get_settings
 from app.services import http as http_svc
+from app.services import redis as redis_svc
 
 logger = logging.getLogger(__name__)
 
 # Versión de la API de Shopify Admin REST
 _API_VERSION = "2025-01"
+
+_CATALOG_CACHE_KEY = "shopify:catalog"
+_CATALOG_TTL = 1200  # 20 minutos
 
 
 def _strip_html(text: str) -> str:
@@ -59,76 +63,81 @@ def _headers() -> Dict[str, str]:
 # Funciones públicas
 # ──────────────────────────────────────────────
 
-async def buscar_productos(query: str, limit: int = 50) -> str:
+async def _obtener_catalogo() -> List[Dict[str, Any]]:
     """
-    Busca productos en Shopify por marca (vendor), título o tags.
-    Prueba vendor primero — ideal para búsquedas por marca como 'SkinCeuticals'.
+    Retorna el catálogo completo de Shopify. Usa Redis como caché (TTL 20 min).
+    En caso de cache miss, pagina toda la tienda y guarda el resultado.
+    """
+    cached = await redis_svc.get_json(_CATALOG_CACHE_KEY)
+    if cached is not None:
+        logger.debug("[SHOPIFY] Catálogo desde caché Redis (%d productos)", len(cached))
+        return cached
+
+    client = http_svc.get_client()
+    url = f"{_base_url()}/products.json"
+    fields = "id,title,vendor,body_html,tags,variants,handle,status,published_at"
+    all_products: List[Dict[str, Any]] = []
+    since_id = 0
+
+    logger.info("[SHOPIFY] Paginando catálogo completo...")
+    while True:
+        resp = await client.get(url, params={
+            "limit": 250, "fields": fields, "since_id": since_id,
+        }, headers=_headers(), timeout=30.0)
+        if resp.status_code != 200:
+            logger.error("[SHOPIFY] Error paginando catálogo: HTTP %d", resp.status_code)
+            break
+        page = resp.json().get("products", [])
+        if not page:
+            break
+        all_products.extend(page)
+        if len(page) < 250:
+            break
+        since_id = page[-1]["id"]
+
+    logger.info("[SHOPIFY] Catálogo cargado: %d productos. Guardando en Redis.", len(all_products))
+    await redis_svc.set_json(_CATALOG_CACHE_KEY, all_products, ttl=_CATALOG_TTL)
+    return all_products
+
+
+async def buscar_productos(query: str) -> str:
+    """
+    Busca productos en el catálogo Shopify (cacheado en Redis).
+    Sin query vacío retorna todo el catálogo. Filtra in-memory por título,
+    vendor, tags y SKU. Sin límite artificial de resultados.
     Retorna un string formateado para el LLM.
     """
     settings = get_settings()
     if not settings.SHOPIFY_STORE_DOMAIN or not settings.SHOPIFY_ACCESS_TOKEN:
         return "La integración con Shopify no está configurada (faltan SHOPIFY_STORE_DOMAIN o SHOPIFY_ACCESS_TOKEN)."
 
-    client = http_svc.get_client()
-    url = f"{_base_url()}/products.json"
-    fields = "id,title,vendor,body_html,tags,variants,handle,status,published_at"
-    query_lower = query.lower()
-    products: List[Dict[str, Any]] = []
-
     try:
-        # 1. Buscar por vendor (marca) — cubre "SkinCeuticals", "CeraVe", etc.
-        resp = await client.get(url, params={
-            "vendor": query, "limit": 250, "fields": fields,
-        }, headers=_headers(), timeout=15.0)
-        if resp.status_code == 200:
-            products = resp.json().get("products", [])
-
-        # 2. Si no hay resultados por vendor, buscar por título
-        if not products:
-            resp = await client.get(url, params={
-                "title": query, "limit": limit, "fields": fields,
-            }, headers=_headers(), timeout=15.0)
-            if resp.status_code == 200:
-                products = resp.json().get("products", [])
-
-        # 3. Fallback: paginar todo el catálogo y filtrar manualmente
-        if not products:
-            since_id = 0
-            all_products: List[Dict[str, Any]] = []
-            while True:
-                resp = await client.get(url, params={
-                    "limit": 250, "fields": fields, "since_id": since_id,
-                }, headers=_headers(), timeout=30.0)
-                if resp.status_code != 200:
-                    break
-                page = resp.json().get("products", [])
-                if not page:
-                    break
-                all_products.extend(page)
-                if len(page) < 250:
-                    break
-                since_id = page[-1]["id"]
-
-            products = [
-                p for p in all_products
-                if query_lower in p.get("title", "").lower()
-                or query_lower in p.get("vendor", "").lower()
-                or query_lower in p.get("tags", "").lower()
-                or any(query_lower in v.get("sku", "").lower() for v in p.get("variants", []))
-            ]
-
-        if not products:
-            return f"No se encontraron productos con el término '{query}' en la tienda."
-
-        # Limitar resultado final para no saturar el contexto del LLM
-        if len(products) > limit:
-            products = products[:limit]
-
-        return _format_products(products)
-
+        catalogo = await _obtener_catalogo()
     except Exception as e:
-        logger.error("Error consultando Shopify: %s", e)
+        logger.error("Error cargando catálogo Shopify: %s", e)
         return f"Error al consultar la tienda Shopify: {e}"
+
+    if not catalogo:
+        return "No se encontraron productos en la tienda."
+
+    query_stripped = (query or "").strip()
+
+    if not query_stripped:
+        products = catalogo
+    else:
+        q = query_stripped.lower()
+        products = [
+            p for p in catalogo
+            if q in p.get("title", "").lower()
+            or q in p.get("vendor", "").lower()
+            or q in p.get("tags", "").lower()
+            or any(q in v.get("sku", "").lower() for v in p.get("variants", []))
+        ]
+
+    if not products:
+        return f"No se encontraron productos con el término '{query_stripped}' en la tienda."
+
+    return _format_products(products)
 
 
 async def obtener_producto_por_id(product_id: int) -> str:
@@ -263,23 +272,62 @@ async def actualizar_precio_variante(variant_id: str, price: str) -> bool:
 # Formateo
 # ──────────────────────────────────────────────
 
-def _format_products(products: List[Dict[str, Any]]) -> str:
-    """Formatea una lista de productos para el LLM."""
-    lines = [f"PRODUCTOS ENCONTRADOS EN LA TIENDA ({len(products)} resultado{'s' if len(products) > 1 else ''}):\n"]
+_COMPACT_THRESHOLD = 15  # > N productos → formato compacto
 
+
+def _format_products(products: List[Dict[str, Any]]) -> str:
+    """
+    Formatea lista de productos para el LLM.
+    Compacto (>15 resultados): una línea por variante.
+    Detallado (≤15): incluye descripción, tags, URL.
+    """
+    n = len(products)
+    plural = "s" if n > 1 else ""
+    lines = [f"PRODUCTOS ENCONTRADOS EN LA TIENDA ({n} resultado{plural}):\n"]
+
+    if n > _COMPACT_THRESHOLD:
+        # Formato compacto: nombre | marca | variante | precio | stock
+        for p in products:
+            title = p.get("title", "Sin nombre")
+            vendor = p.get("vendor", "—")
+            is_published = p.get("published_at") is not None
+            pub_tag = "" if is_published else " [no publicado]"
+
+            variants = p.get("variants", [])
+            if not variants:
+                lines.append(f"• {title} ({vendor}){pub_tag} — sin variantes")
+                continue
+
+            for v in variants:
+                v_title = v.get("title", "")
+                price = _format_clp(v.get("price", "0"))
+                sku = v.get("sku", "—")
+                inv_mgmt = v.get("inventory_management")
+                inv_qty = v.get("inventory_quantity")
+
+                row = f"• {title}"
+                if v_title and v_title != "Default Title":
+                    row += f" — {v_title}"
+                row += f" | {vendor} | {price} CLP | SKU: {sku}"
+                if inv_mgmt == "shopify" and inv_qty is not None:
+                    row += f" | Stock: {inv_qty}"
+                row += pub_tag
+                lines.append(row)
+
+        return "\n".join(lines)
+
+    # Formato detallado para conjuntos pequeños
     for p in products:
         title = p.get("title", "Sin nombre")
         vendor = p.get("vendor", "—")
         description = _strip_html(p.get("body_html", ""))
         tags = p.get("tags", "")
         handle = p.get("handle", "")
-        status = p.get("status", "unknown")
         is_published = p.get("published_at") is not None
 
         lines.append(f"━━━ {title} ━━━")
         lines.append(f"  Marca: {vendor}")
         if description:
-            # Truncar descripción larga
             desc_short = description[:300] + ("..." if len(description) > 300 else "")
             lines.append(f"  Descripción: {desc_short}")
         if tags:

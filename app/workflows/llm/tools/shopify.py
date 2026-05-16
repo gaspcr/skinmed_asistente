@@ -24,7 +24,9 @@ TOOL_DEFINITION = {
             "Usa esta función cuando el usuario pregunte sobre productos de la tienda, "
             "stock disponible, precios, marcas, o información de algún producto cosmético o dermatológico "
             "que se venda en la clínica. Puedes buscar por nombre del producto, marca (ej. SkinCeuticals, "
-            "CeraVe, La Roche-Posay), o tipo de producto (ej. serum, protector solar)."
+            "CeraVe, La Roche-Posay), o tipo de producto (ej. serum, protector solar). "
+            "Si el usuario quiere ver TODO el catálogo o comparar productos de distintas categorías, "
+            "pasa busqueda vacío (\"\")."
         ),
         "parameters": {
             "type": "object",
@@ -33,11 +35,12 @@ TOOL_DEFINITION = {
                     "type": "string",
                     "description": (
                         "Término de búsqueda: nombre del producto, marca, o tipo. "
-                        "Ejemplos: 'C E Ferulic', 'SkinCeuticals', 'protector solar', 'serum vitamina c'."
+                        "Ejemplos: 'C E Ferulic', 'SkinCeuticals', 'protector solar', 'serum vitamina c'. "
+                        "Dejar vacío para obtener el catálogo completo."
                     ),
                 },
             },
-            "required": ["busqueda"],
+            "required": [],
         },
     },
 }
@@ -48,13 +51,8 @@ TOOL_DEFINITION = {
 
 async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
     """Ejecuta la búsqueda de productos en Shopify."""
-    busqueda = arguments.get("busqueda")
+    busqueda = arguments.get("busqueda", "")
 
-    if not busqueda:
-        return "Error: debes proporcionar un término de búsqueda para consultar productos."
+    logger.info("Shopify search solicitada por %s (%s): '%s'", user.name, phone, busqueda or "<catálogo completo>")
 
-    logger.info("Shopify search solicitada por %s (%s): '%s'", user.name, phone, busqueda)
-
-    resultados = await shopify_service.buscar_productos(query=busqueda)
-
-    return resultados
+    return await shopify_service.buscar_productos(query=busqueda)
