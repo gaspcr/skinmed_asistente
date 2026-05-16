@@ -100,11 +100,93 @@ async def _obtener_catalogo() -> List[Dict[str, Any]]:
     return all_products
 
 
+def _campos_texto(p: Dict[str, Any]) -> str:
+    """Concatena los campos buscables de un producto en un solo string."""
+    title = p.get("title") or ""
+    vendor = p.get("vendor") or ""
+    tags = p.get("tags") or ""
+    skus = " ".join((v.get("sku") or "") for v in p.get("variants", []))
+    return f"{title} {vendor} {tags} {skus}"
+
+
+def _norm_punct(text: str) -> str:
+    """Elimina puntuación (guiones, puntos, etc.) pero mantiene espacios."""
+    cleaned = re.sub(r"[^\w\s]", " ", text.lower())
+    cleaned = re.sub(r"_", " ", cleaned)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
+def _norm_compact(text: str) -> str:
+    """Elimina todo excepto letras y dígitos (útil para 'ptiox' vs 'P-Tiox')."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def _filtrar_productos(catalogo: List[Dict[str, Any]], query: str) -> List[Dict[str, Any]]:
+    """
+    Búsqueda en cascada sobre el catálogo:
+      1. Substring exacto (case-insensitive)
+      2. Substring ignorando puntuación/guiones
+      3. Substring compacto sin separadores ('ptiox' → 'P-Tiox')
+      4. Todos los tokens del query presentes en el texto
+      5. Fuzzy con difflib (umbral 0.75) para typos
+    Retorna los resultados del primer nivel que encuentre matches.
+    """
+    import difflib
+
+    q_lower = query.lower()
+    q_punct = _norm_punct(query)
+    q_compact = _norm_compact(query)
+    q_tokens = q_punct.split()
+
+    # Nivel 1: substring exacto
+    level1 = [p for p in catalogo if q_lower in _campos_texto(p).lower()]
+    if level1:
+        return level1
+
+    # Nivel 2: substring ignorando puntuación
+    level2 = [p for p in catalogo if q_punct in _norm_punct(_campos_texto(p))]
+    if level2:
+        return level2
+
+    # Nivel 3: substring compacto (ignora guiones, espacios, puntuación)
+    level3 = [p for p in catalogo if q_compact and q_compact in _norm_compact(_campos_texto(p))]
+    if level3:
+        return level3
+
+    # Nivel 4: todos los tokens del query presentes en el texto
+    if q_tokens:
+        texto_norm_cache = {id(p): _norm_punct(_campos_texto(p)) for p in catalogo}
+        level4 = [
+            p for p in catalogo
+            if all(tok in texto_norm_cache[id(p)] for tok in q_tokens)
+        ]
+        if level4:
+            return level4
+
+    # Nivel 5: fuzzy con difflib sobre palabras individuales del catálogo
+    _FUZZY_THRESHOLD = 0.75
+    scored: List[tuple] = []
+    for p in catalogo:
+        words = re.findall(r"[a-z0-9]+", _norm_compact(_campos_texto(p)))
+        if not words:
+            continue
+        best = max(
+            difflib.SequenceMatcher(None, q_compact, w).ratio()
+            for w in words
+            if w
+        )
+        if best >= _FUZZY_THRESHOLD:
+            scored.append((best, p))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [p for _, p in scored]
+
+
 async def buscar_productos(query: str) -> str:
     """
     Busca productos en el catálogo Shopify (cacheado en Redis).
-    Sin query vacío retorna todo el catálogo. Filtra in-memory por título,
-    vendor, tags y SKU. Sin límite artificial de resultados.
+    Sin query retorna todo el catálogo. Usa búsqueda en cascada con soporte
+    fuzzy. Sin límite artificial de resultados.
     Retorna un string formateado para el LLM.
     """
     settings = get_settings()
@@ -125,14 +207,7 @@ async def buscar_productos(query: str) -> str:
     if not query_stripped:
         products = catalogo
     else:
-        q = query_stripped.lower()
-        products = [
-            p for p in catalogo
-            if q in p.get("title", "").lower()
-            or q in p.get("vendor", "").lower()
-            or q in p.get("tags", "").lower()
-            or any(q in v.get("sku", "").lower() for v in p.get("variants", []))
-        ]
+        products = _filtrar_productos(catalogo, query_stripped)
 
     if not products:
         return f"No se encontraron productos con el término '{query_stripped}' en la tienda."
