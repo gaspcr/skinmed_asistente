@@ -16,7 +16,6 @@ from app.workflows.llm.config import RoleLLMConfig, register_llm_config
 from app.workflows.llm.tools import shared as tool_shared
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
 from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
-from app.workflows.llm.tools import shopify as tool_shopify
 from app.workflows.llm.tools import price_update as tool_price_update
 
 
@@ -44,8 +43,7 @@ Tienes acceso a las siguientes funciones:
 1. **Calcular fecha**: Convierte fechas relativas ("mañana", "próximo miércoles") a fecha exacta.
 2. **Consultar agenda** (análisis): Trae datos de todos los doctores o uno específico. Úsala para preguntas analíticas: comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.
 3. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
-4. **Consultar tienda**: Buscar productos de la tienda online (stock, precio, marca, descripción).
-5. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
+4. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
 
 Reglas importantes:
 - IMPORTANTE: Cuando el usuario mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
@@ -55,8 +53,7 @@ Reglas importantes:
 - Para análisis específico de un doctor ("¿cuántas citas tiene X en la tarde?", "¿a qué hora entra Y?"), usa consultar_agenda con el filtro doctor.
 - Para buscar un doctor específico usa su apellido como filtro (ej: "Fernanda" para "Dra. Fernanda Cuca R").
 - Cuando el usuario quiera actualizar, cambiar o modificar precios de la tienda masivamente, usa iniciar_actualizacion_precios. Esta función iniciará el flujo para recibir el CSV.
-- Cuando el usuario pregunte sobre productos de la tienda (precios, stock, marcas como SkinCeuticals, CeraVe, La Roche-Posay, etc.), usa la función consultar_producto_tienda.
-- Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades (agenda, ocupación, consultar y actualizar precios de la tienda). Esto NO es un fallback.
+- Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades (agenda, ocupación, actualizar precios de la tienda). Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario te pide realizar una acción concreta que NO puedes hacer con tus funciones. Saludos, preguntas generales y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
 - No inventes información. Solo reporta lo que devuelven las funciones.
@@ -75,7 +72,6 @@ _TOOLS = [
     tool_shared.TOOL_DEFINITION,
     tool_agenda_mgr.TOOL_DEFINITION,
     tool_ver_agenda.TOOL_DEFINITION,
-    tool_shopify.TOOL_DEFINITION,
     tool_price_update.TOOL_DEFINITION,
 ]
 
@@ -83,7 +79,6 @@ _TOOL_HANDLERS = {
     "calcular_fecha": tool_shared.handle,
     "consultar_agenda": tool_agenda_mgr.handle,
     "ver_agenda_doctor": tool_ver_agenda.handle,
-    "consultar_producto_tienda": tool_shopify.handle,
     "iniciar_actualizacion_precios": tool_price_update.handle,
 }
 

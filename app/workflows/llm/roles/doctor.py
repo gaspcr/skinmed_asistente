@@ -13,7 +13,6 @@ from app.workflows.llm.config import RoleLLMConfig, register_llm_config
 from app.workflows.llm.tools import shared as tool_shared
 from app.workflows.llm.tools import agenda as tool_agenda
 from app.workflows.llm.tools import recados as tool_recados
-from app.workflows.llm.tools import shopify as tool_shopify
 
 
 # ──────────────────────────────────────────────
@@ -31,7 +30,6 @@ Tienes acceso a las siguientes funciones:
 2. **Revisar agenda**: Consultar las citas del doctor para un día específico.
 3. **Revisar recados**: Ver los recados/mensajes pendientes del doctor.
 4. **Publicar recado**: Crear un nuevo recado con una categoría específica.
-5. **Consultar tienda**: Buscar productos de la tienda online (stock, precio, marca, descripción).
 
 Las categorías de recados disponibles son:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -44,8 +42,7 @@ Reglas importantes:
 - Cuando el doctor quiera ver su agenda, usa la función revisar_agenda. Si menciona una fecha relativa, primero llama a calcular_fecha y luego usa el resultado en revisar_agenda.
 - Cuando el doctor quiera ver sus recados/mensajes, usa la función revisar_recados.
 - Cuando el doctor quiera dejar un recado o mensaje, usa la función publicar_recado. Asegúrate de identificar la categoría correcta y el contenido del mensaje.
-- Si el doctor te saluda, pregunta en qué puedes ayudar, o pregunta qué puedes hacer, responde amablemente listando tus capacidades (revisar agenda, revisar recados, publicar recado, consultar productos de la tienda). Esto NO es un fallback.
-- Cuando el doctor pregunte sobre productos de la tienda (precios, stock, marcas como SkinCeuticals, CeraVe, La Roche-Posay, etc.), usa la función consultar_producto_tienda.
+- Si el doctor te saluda, pregunta en qué puedes ayudar, o pregunta qué puedes hacer, responde amablemente listando tus capacidades (revisar agenda, revisar recados, publicar recado). Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el doctor te pide realizar una acción concreta que NO puedes hacer con tus funciones (por ejemplo: "recetame un medicamento", "llama a un paciente", etc.). Saludos, preguntas generales y conversación casual NO son fallback.
 - Después de completar una acción, pregunta amablemente si necesita algo más.
 - No inventes información. Solo reporta lo que devuelven las funciones.
@@ -65,7 +62,6 @@ _TOOLS = [
     tool_agenda.TOOL_DEFINITION,
     tool_recados.REVISAR_RECADOS_TOOL,
     tool_recados.PUBLICAR_RECADO_TOOL,
-    tool_shopify.TOOL_DEFINITION,
 ]
 
 
@@ -78,7 +74,6 @@ _TOOL_HANDLERS = {
     "revisar_agenda": tool_agenda.handle,
     "revisar_recados": tool_recados.handle_revisar,
     "publicar_recado": tool_recados.handle_publicar,
-    "consultar_producto_tienda": tool_shopify.handle,
 }
 
 

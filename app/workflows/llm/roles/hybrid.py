@@ -25,7 +25,6 @@ from app.workflows.llm.tools import agenda as tool_agenda
 from app.workflows.llm.tools import recados as tool_recados
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
 from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
-from app.workflows.llm.tools import shopify as tool_shopify
 from app.workflows.llm.tools import price_update as tool_price_update
 
 
@@ -63,8 +62,7 @@ Tienes acceso a las siguientes funciones:
 *Funciones de gerencia (para la clínica):*
 5. **Consultar agenda** (análisis): Datos de todos los doctores o uno específico para preguntas analíticas (comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.)
 6. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de cualquier doctor con glosario.
-7. **Consultar tienda**: Busca productos de la tienda online (stock, precio, marca, descripción).
-8. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
+7. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
 
 Categorías de recados disponibles:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -79,7 +77,6 @@ Reglas importantes:
 - Para VER la agenda formateada de un doctor específico → usa ver_agenda_doctor.
 - Para ANALIZAR datos de agendas → usa consultar_agenda.
 - Cuando el usuario quiera actualizar, cambiar o modificar precios de la tienda masivamente, usa iniciar_actualizacion_precios. Esta función iniciará el flujo para recibir el CSV.
-- Cuando pregunten sobre productos de la tienda (precios, stock, marcas como SkinCeuticals, CeraVe, La Roche-Posay, etc.), usa la función consultar_producto_tienda.
 - Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario pide una acción concreta que no puedes hacer. Saludos y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
@@ -100,7 +97,6 @@ _TOOLS = [
     tool_recados.PUBLICAR_RECADO_TOOL, # publicar_recado
     tool_agenda_mgr.TOOL_DEFINITION,   # consultar_agenda (gerencia - análisis)
     tool_ver_agenda.TOOL_DEFINITION,   # ver_agenda_doctor (gerencia - mostrar)
-    tool_shopify.TOOL_DEFINITION,      # consultar_producto_tienda
     tool_price_update.TOOL_DEFINITION, # iniciar_actualizacion_precios
 ]
 
@@ -111,7 +107,6 @@ _TOOL_HANDLERS = {
     "publicar_recado":               tool_recados.handle_publicar,
     "consultar_agenda":              tool_agenda_mgr.handle,
     "ver_agenda_doctor":             tool_ver_agenda.handle,
-    "consultar_producto_tienda":     tool_shopify.handle,
     "iniciar_actualizacion_precios": tool_price_update.handle,
 }
 
