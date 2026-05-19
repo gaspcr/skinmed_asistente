@@ -65,6 +65,7 @@ Tienes acceso a las siguientes funciones:
 6. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de cualquier doctor con glosario.
 7. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
 8. **Buscar productos**: Busca productos del catálogo Shopify por intención en lenguaje natural (sinónimos, descripciones vagas, marca parcial). Úsala cuando alguien pregunte si existe un producto.
+9. **Listar productos**: Lista productos por filtros exactos (marca/vendor, tipo, tag, con/sin stock). Úsala para "todos los X", "qué productos de la marca Y", listados por categoría/etiqueta o por stock. Sin relevancia, devuelve TODOS los que matchean.
 
 Categorías de recados disponibles:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -80,6 +81,7 @@ Reglas importantes:
 - Para ANALIZAR datos de agendas → usa consultar_agenda.
 - Cuando el usuario quiera actualizar, cambiar o modificar precios de la tienda masivamente, usa iniciar_actualizacion_precios. Esta función iniciará el flujo para recibir el CSV.
 - Cuando se pregunte si la tienda tiene un producto o se busque algo específico ("¿tienen X?", "busco algo para Y"), usa buscar_productos. NO adivines el catálogo de memoria.
+- Para LISTADOS/INVENTARIO ("¿qué productos tenemos de SkinCeuticals?", "todos los productos con stock", "lista de cremas antiedad", "qué tenemos con tag Vitamina C") usa listar_productos con los filtros correspondientes. NO uses buscar_productos para listados — ese tool ranquea por relevancia y limita a 10.
 - Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario pide una acción concreta que no puedes hacer. Saludos y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
@@ -94,14 +96,15 @@ Reglas importantes:
 # ──────────────────────────────────────────────
 
 _TOOLS = [
-    tool_shared.TOOL_DEFINITION,       # calcular_fecha (shared)
-    tool_agenda.TOOL_DEFINITION,       # revisar_agenda (propia del médico)
-    tool_recados.REVISAR_RECADOS_TOOL, # revisar_recados
-    tool_recados.PUBLICAR_RECADO_TOOL, # publicar_recado
-    tool_agenda_mgr.TOOL_DEFINITION,   # consultar_agenda (gerencia - análisis)
-    tool_ver_agenda.TOOL_DEFINITION,   # ver_agenda_doctor (gerencia - mostrar)
-    tool_price_update.TOOL_DEFINITION, # iniciar_actualizacion_precios
-    tool_products.TOOL_DEFINITION,     # buscar_productos
+    tool_shared.TOOL_DEFINITION,           # calcular_fecha (shared)
+    tool_agenda.TOOL_DEFINITION,           # revisar_agenda (propia del médico)
+    tool_recados.REVISAR_RECADOS_TOOL,     # revisar_recados
+    tool_recados.PUBLICAR_RECADO_TOOL,     # publicar_recado
+    tool_agenda_mgr.TOOL_DEFINITION,       # consultar_agenda (gerencia - análisis)
+    tool_ver_agenda.TOOL_DEFINITION,       # ver_agenda_doctor (gerencia - mostrar)
+    tool_price_update.TOOL_DEFINITION,     # iniciar_actualizacion_precios
+    tool_products.TOOL_DEFINITION,         # buscar_productos
+    tool_products.LISTAR_TOOL_DEFINITION,  # listar_productos
 ]
 
 _TOOL_HANDLERS = {
@@ -113,6 +116,7 @@ _TOOL_HANDLERS = {
     "ver_agenda_doctor":             tool_ver_agenda.handle,
     "iniciar_actualizacion_precios": tool_price_update.handle,
     "buscar_productos":              tool_products.handle,
+    "listar_productos":              tool_products.handle_listar,
 }
 
 

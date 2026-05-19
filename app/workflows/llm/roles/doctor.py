@@ -32,6 +32,7 @@ Tienes acceso a las siguientes funciones:
 3. **Revisar recados**: Ver los recados/mensajes pendientes del doctor.
 4. **Publicar recado**: Crear un nuevo recado con una categoría específica.
 5. **Buscar productos**: Buscar productos del catálogo Shopify de la tienda usando lenguaje natural (sinónimos, descripciones vagas, marca parcial).
+6. **Listar productos**: Lista productos por filtros exactos (marca/vendor, tipo, tag, con/sin stock). Úsala para "todos los X", "qué productos de la marca Y", listados por categoría/etiqueta o por stock. Sin relevancia, devuelve TODOS los que matchean.
 
 Las categorías de recados disponibles son:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -45,6 +46,7 @@ Reglas importantes:
 - Cuando el doctor quiera ver sus recados/mensajes, usa la función revisar_recados.
 - Cuando el doctor quiera dejar un recado o mensaje, usa la función publicar_recado. Asegúrate de identificar la categoría correcta y el contenido del mensaje.
 - Cuando el doctor pregunte si la tienda tiene un producto o busque algo específico ("¿tenemos X?", "¿hay algo para Y?"), usa buscar_productos. NO adivines el catálogo de memoria.
+- Para LISTADOS/INVENTARIO ("todos los productos de SkinCeuticals", "qué tenemos con stock de la marca Y", "lista de cremas antiedad") usa listar_productos con filtros (vendor/product_type/tag, opcionalmente in_stock_only). NO uses buscar_productos para listados — limita a 10 y ranquea por relevancia.
 - Si el doctor te saluda, pregunta en qué puedes ayudar, o pregunta qué puedes hacer, responde amablemente listando tus capacidades (revisar agenda, revisar recados, publicar recado). Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el doctor te pide realizar una acción concreta que NO puedes hacer con tus funciones (por ejemplo: "recetame un medicamento", "llama a un paciente", etc.). Saludos, preguntas generales y conversación casual NO son fallback.
 - Después de completar una acción, pregunta amablemente si necesita algo más.
@@ -66,6 +68,7 @@ _TOOLS = [
     tool_recados.REVISAR_RECADOS_TOOL,
     tool_recados.PUBLICAR_RECADO_TOOL,
     tool_products.TOOL_DEFINITION,
+    tool_products.LISTAR_TOOL_DEFINITION,
 ]
 
 
@@ -79,6 +82,7 @@ _TOOL_HANDLERS = {
     "revisar_recados": tool_recados.handle_revisar,
     "publicar_recado": tool_recados.handle_publicar,
     "buscar_productos": tool_products.handle,
+    "listar_productos": tool_products.handle_listar,
 }
 
 

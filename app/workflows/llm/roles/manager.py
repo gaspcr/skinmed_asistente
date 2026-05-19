@@ -46,6 +46,7 @@ Tienes acceso a las siguientes funciones:
 3. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
 4. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
 5. **Buscar productos**: Busca productos del catálogo Shopify por intención en lenguaje natural (sinónimos, descripciones vagas, marca parcial). Úsala cuando el usuario pregunte si existe un producto o esté buscando algo específico de la tienda.
+6. **Listar productos**: Lista productos por filtros exactos (marca/vendor, tipo, tag, con/sin stock). Úsala cuando el usuario pida "todos los X", "qué productos de la marca Y", listados por categoría/etiqueta o por stock, etc. No usa relevancia: devuelve TODOS los que matchean.
 
 Reglas importantes:
 - IMPORTANTE: Cuando el usuario mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
@@ -56,6 +57,7 @@ Reglas importantes:
 - Para buscar un doctor específico usa su apellido como filtro (ej: "Fernanda" para "Dra. Fernanda Cuca R").
 - Cuando el usuario quiera actualizar, cambiar o modificar precios de la tienda masivamente, usa iniciar_actualizacion_precios. Esta función iniciará el flujo para recibir el CSV.
 - Cuando el usuario pregunte si la tienda tiene un producto, busque algo específico, mencione síntomas o necesidades cosméticas/dermatológicas relacionadas con productos ("¿tienen algo para acné?", "busco un protector solar"), usa buscar_productos. Esta función maneja sinónimos y descripciones vagas — NO intentes adivinar el catálogo de memoria.
+- Para preguntas de LISTADO/INVENTARIO ("¿qué productos tenemos de SkinCeuticals?", "todos los productos con stock", "lista de cremas antiedad", "qué tenemos con tag Vitamina C") usa listar_productos con los filtros correspondientes (vendor/product_type/tag, opcionalmente in_stock_only). NO uses buscar_productos para listados — ese tool ranquea por relevancia y limita a 10.
 - Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades (agenda, ocupación, actualizar precios de la tienda). Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario te pide realizar una acción concreta que NO puedes hacer con tus funciones. Saludos, preguntas generales y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
@@ -77,6 +79,7 @@ _TOOLS = [
     tool_ver_agenda.TOOL_DEFINITION,
     tool_price_update.TOOL_DEFINITION,
     tool_products.TOOL_DEFINITION,
+    tool_products.LISTAR_TOOL_DEFINITION,
 ]
 
 _TOOL_HANDLERS = {
@@ -85,6 +88,7 @@ _TOOL_HANDLERS = {
     "ver_agenda_doctor": tool_ver_agenda.handle,
     "iniciar_actualizacion_precios": tool_price_update.handle,
     "buscar_productos": tool_products.handle,
+    "listar_productos": tool_products.handle_listar,
 }
 
 

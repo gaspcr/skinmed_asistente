@@ -5,9 +5,10 @@ Expone las funciones necesarias para actualizar precios masivamente y para
 listar el catalogo de productos para sincronizacion con la base de datos
 vectorial.
 """
+import json
 import logging
 import re
-from typing import AsyncIterator, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 from app.config import get_settings
 from app.services import http as http_svc
@@ -145,6 +146,7 @@ def build_product_text(product: Dict) -> str:
 
     Concatena con ` | ` los campos no vacios:
       title | vendor | product_type | body_html(stripped) | tags | variant_titles
+      | metafields (clave + valor, si product["_metafields"] esta presente).
     """
     parts: List[str] = []
 
@@ -176,7 +178,199 @@ def build_product_text(product: Dict) -> str:
     if variant_titles:
         parts.append(" ".join(variant_titles))
 
+    metafields = product.get("_metafields") or {}
+    if isinstance(metafields, dict):
+        for full_key, value in metafields.items():
+            if not value:
+                continue
+            label = full_key.split(".", 1)[-1].replace("_", " ").replace("-", " ").strip()
+            parts.append(f"{label}: {value}" if label else str(value))
+
     return " | ".join(parts)
+
+
+# Tipos de metafield cuyo `value` es texto humano (lo que queremos indexar en RAG).
+# Excluye explicitamente: file_reference, *_reference, json, number_*, boolean,
+# date, url, dimension, weight, volume, rating, metaobject_reference, etc.
+_TEXT_METAFIELD_TYPES = {
+    "single_line_text_field",
+    "multi_line_text_field",
+    "rich_text_field",
+    "list.single_line_text_field",
+    "list.multi_line_text_field",
+}
+
+
+def _extract_rich_text(raw: Any) -> str:
+    """Convierte rich_text_field (JSON con nodos type/children/value) a texto plano."""
+    if raw is None:
+        return ""
+    if isinstance(raw, str):
+        try:
+            data = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw.strip()
+    else:
+        data = raw
+
+    parts: List[str] = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get("type") == "text":
+                v = node.get("value")
+                if isinstance(v, str) and v.strip():
+                    parts.append(v.strip())
+            for child in node.get("children") or []:
+                walk(child)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    return " ".join(parts).strip()
+
+
+def _extract_list_text(raw: Any) -> str:
+    """Convierte list.*_text_field (JSON array de strings) a texto unido por ' | '."""
+    if raw is None:
+        return ""
+    if isinstance(raw, list):
+        items = raw
+    elif isinstance(raw, str):
+        try:
+            items = json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw.strip()
+    else:
+        return str(raw).strip()
+    if not isinstance(items, list):
+        return ""
+    return " | ".join(str(i).strip() for i in items if str(i).strip())
+
+
+def _normalize_metafield_value(mtype: str, raw_value: Any) -> str:
+    """Devuelve la representacion en texto plano de un metafield indexable."""
+    if raw_value is None:
+        return ""
+    if mtype == "rich_text_field":
+        return _extract_rich_text(raw_value)
+    if mtype.startswith("list."):
+        return _extract_list_text(raw_value)
+    if isinstance(raw_value, str):
+        return raw_value.strip()
+    return str(raw_value).strip()
+
+
+_METAFIELDS_QUERY = """
+query GetMetafields($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Product {
+      id
+      metafields(first: 100) {
+        edges {
+          node {
+            namespace
+            key
+            value
+            type
+          }
+        }
+      }
+    }
+  }
+}
+""".strip()
+
+
+async def fetch_metafields_for_products(
+    product_ids: List[str],
+    batch_size: int = 10,
+    timeout: float = 15.0,
+) -> Dict[str, Dict[str, str]]:
+    """
+    Consulta a Shopify (GraphQL) los metafields de tipo texto para los productos
+    indicados. Devuelve un dict {product_id_str: {"namespace.key": "valor", ...}}.
+
+    - Solo se incluyen tipos en `_TEXT_METAFIELD_TYPES` (texto humano legible).
+    - Tipos `rich_text_field` y `list.*` se aplanan a texto plano.
+    - Productos sin metafields (o que fallen) aparecen con dict vacio.
+    - Si la llamada a Shopify falla por completo retorna {} (no propaga).
+    """
+    if not product_ids:
+        return {}
+
+    settings = get_settings()
+    if not settings.SHOPIFY_STORE_DOMAIN or not settings.SHOPIFY_ACCESS_TOKEN:
+        logger.warning("[SHOPIFY] Metafields fetch saltado: credenciales no configuradas")
+        return {}
+
+    client = http_svc.get_client()
+    url = f"{_base_url()}/graphql.json"
+    result: Dict[str, Dict[str, str]] = {}
+
+    for i in range(0, len(product_ids), batch_size):
+        batch = [str(pid) for pid in product_ids[i:i + batch_size] if pid]
+        if not batch:
+            continue
+        gids = [f"gid://shopify/Product/{pid}" for pid in batch]
+
+        try:
+            resp = await client.post(
+                url,
+                json={"query": _METAFIELDS_QUERY, "variables": {"ids": gids}},
+                headers=_headers(),
+                timeout=timeout,
+            )
+        except Exception as e:
+            logger.warning("[SHOPIFY] Metafields fetch fallo en batch %d: %s", i, e)
+            continue
+
+        if resp.status_code != 200:
+            logger.warning(
+                "[SHOPIFY] Metafields HTTP %d en batch %d — %s",
+                resp.status_code, i, resp.text[:200],
+            )
+            continue
+
+        try:
+            body = resp.json()
+        except ValueError:
+            logger.warning("[SHOPIFY] Metafields: respuesta no es JSON en batch %d", i)
+            continue
+
+        if body.get("errors"):
+            logger.warning("[SHOPIFY] Metafields GraphQL errors en batch %d: %s",
+                           i, body["errors"])
+            continue
+
+        nodes = (body.get("data") or {}).get("nodes") or []
+        for node in nodes:
+            if not node:
+                continue
+            gid = node.get("id") or ""
+            numeric_id = gid.rsplit("/", 1)[-1]
+            if not numeric_id:
+                continue
+
+            extracted: Dict[str, str] = {}
+            for edge in (node.get("metafields") or {}).get("edges") or []:
+                mf = edge.get("node") or {}
+                mtype = mf.get("type") or ""
+                if mtype not in _TEXT_METAFIELD_TYPES:
+                    continue
+                ns = (mf.get("namespace") or "").strip()
+                key = (mf.get("key") or "").strip()
+                if not key:
+                    continue
+                full_key = f"{ns}.{key}" if ns else key
+                value = _normalize_metafield_value(mtype, mf.get("value"))
+                if value:
+                    extracted[full_key] = value
+
+            result[numeric_id] = extracted
+
+    return result
 
 
 _LIVE_INVENTORY_QUERY = """

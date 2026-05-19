@@ -161,6 +161,62 @@ async def search_products_hybrid(query: str, limit: int = 5) -> List[Dict[str, A
 
 
 # ──────────────────────────────────────────────
+# Filter-based listing (sin relevancia semantica)
+# ──────────────────────────────────────────────
+
+async def list_products_by_filter(
+    vendor: Optional[str] = None,
+    product_type: Optional[str] = None,
+    tag: Optional[str] = None,
+    status: Optional[str] = "active",
+    limit: int = 50,
+) -> List[Dict[str, Any]]:
+    """
+    Lista productos aplicando filtros exactos (no relevancia semantica).
+
+    - `vendor` y `product_type`: comparacion ILIKE (case-insensitive exacto).
+    - `tag`: match case-insensitive contra cualquier elemento del array `tags`.
+    - `status`: comparacion exacta (default 'active'). Pasa None para no filtrar.
+    - Resultados ordenados por titulo, formateados con `_format_row`.
+    """
+    where: List[str] = []
+    params: List[Any] = []
+
+    if vendor:
+        params.append(vendor)
+        where.append(f"vendor ILIKE ${len(params)}")
+    if product_type:
+        params.append(product_type)
+        where.append(f"product_type ILIKE ${len(params)}")
+    if tag:
+        params.append(tag.lower())
+        where.append(
+            f"EXISTS (SELECT 1 FROM unnest(tags) t WHERE LOWER(t) = ${len(params)})"
+        )
+    if status:
+        params.append(status)
+        where.append(f"status = ${len(params)}")
+
+    where_clause = " AND ".join(where) if where else "TRUE"
+    params.append(limit)
+    limit_param = f"${len(params)}"
+
+    sql = f"""
+    SELECT id, shopify_id, title, vendor, product_type, tags, status, handle, data,
+           NULL::float AS rrf_score
+    FROM products
+    WHERE {where_clause}
+    ORDER BY title
+    LIMIT {limit_param};
+    """
+
+    pool = pg_svc.get_pool()
+    async with pool.acquire() as conn:
+        rows = await conn.fetch(sql, *params)
+    return [_format_row(row) for row in rows]
+
+
+# ──────────────────────────────────────────────
 # Formatter
 # ──────────────────────────────────────────────
 
@@ -198,6 +254,10 @@ def _format_row(row) -> Dict[str, Any]:
     if handle and settings.SHOPIFY_STORE_DOMAIN:
         shopify_url = f"https://{settings.SHOPIFY_STORE_DOMAIN.rstrip('/')}/products/{handle}"
 
+    metafields = data.get("_metafields") or {}
+    if not isinstance(metafields, dict):
+        metafields = {}
+
     return {
         "id": row["id"],
         "shopify_id": row["shopify_id"],
@@ -209,5 +269,6 @@ def _format_row(row) -> Dict[str, Any]:
         "price_range": price_range,
         "in_stock": in_stock,
         "shopify_url": shopify_url,
+        "metafields": metafields,
         "rrf_score": float(row["rrf_score"]) if row["rrf_score"] is not None else 0.0,
     }
