@@ -64,13 +64,31 @@ async def _init_connection(conn: asyncpg.Connection) -> None:
 
 
 async def init(url: str, min_size: int = 1, max_size: int = 5) -> None:
-    """Crea el pool de conexiones a Postgres."""
+    """Crea el pool de conexiones a Postgres.
+
+    Antes de crear el pool, asegura que las extensiones requeridas (vector,
+    pg_trgm) existan. Es necesario porque el callback `_init_connection`
+    registra el codec de pgvector, que requiere que el tipo `vector` exista
+    en la BD; en una BD recien creada todavia no esta.
+    """
     global _pool
     if not url:
         logger.warning("DATABASE_URL no configurada; Postgres deshabilitado")
         return
 
     ssl_param = _build_ssl_param(url)
+    connect_kwargs = {"dsn": url}
+    if ssl_param is not None:
+        connect_kwargs["ssl"] = ssl_param
+
+    # Bootstrap: habilitar extensiones antes de armar el pool.
+    bootstrap = await asyncpg.connect(**connect_kwargs)
+    try:
+        await bootstrap.execute("CREATE EXTENSION IF NOT EXISTS vector")
+        await bootstrap.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+    finally:
+        await bootstrap.close()
+
     create_pool_kwargs = {
         "dsn": url,
         "min_size": min_size,
