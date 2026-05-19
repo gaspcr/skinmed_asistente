@@ -11,6 +11,7 @@ import logging
 from typing import Any, Dict
 
 from app.services import products as products_svc
+from app.services import shopify_service
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,11 @@ TOOL_DEFINITION = {
             "'crema con ácido hialuronico', 'protector solar para piel grasa'). "
             "Usala cuando el usuario pregunte si existe un producto o este "
             "buscando algo especifico de la tienda. Devuelve hasta `limit` "
-            "productos ordenados por relevancia, con precio, stock y URL."
+            "productos ordenados por relevancia, con precio y stock consultados "
+            "en vivo a Shopify (campo `total_inventory` con unidades disponibles "
+            "y `in_stock` booleano). Si `data_freshness` es 'cached' los datos "
+            "de precio/stock pueden estar desactualizados; si es 'live' son "
+            "actuales. Nunca asumas falta de stock si `data_freshness` es 'cached'."
         ),
         "parameters": {
             "type": "object",
@@ -87,20 +92,41 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
             "mensaje": "No se encontraron productos relevantes para esta consulta.",
         }, ensure_ascii=False)
 
-    productos_compactos = [
-        {
+    ids = [r["id"] for r in resultados if r.get("id")]
+    live_data: Dict[str, Dict[str, Any]] = {}
+    try:
+        live_data = await shopify_service.fetch_live_pricing_inventory(ids)
+    except Exception:
+        logger.exception("[BUSCAR_PRODUCTOS] Error consultando datos live de Shopify")
+        live_data = {}
+
+    productos_compactos = []
+    for r in resultados:
+        live = live_data.get(r["id"])
+        if live is not None:
+            price_range = live["price_range"]
+            in_stock = live["in_stock"]
+            total_inventory = live["total_inventory"]
+            data_freshness = "live"
+        else:
+            price_range = r["price_range"]
+            in_stock = r["in_stock"]
+            total_inventory = None
+            data_freshness = "cached"
+
+        productos_compactos.append({
             "id": r["id"],
             "title": r["title"],
             "vendor": r["vendor"],
             "product_type": r["product_type"],
             "tags": r["tags"],
-            "price_range": r["price_range"],
-            "in_stock": r["in_stock"],
+            "price_range": price_range,
+            "in_stock": in_stock,
+            "total_inventory": total_inventory,
             "status": r["status"],
             "shopify_url": r["shopify_url"],
-        }
-        for r in resultados
-    ]
+            "data_freshness": data_freshness,
+        })
 
     return json.dumps({
         "query": query,

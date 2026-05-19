@@ -7,7 +7,7 @@ vectorial.
 """
 import logging
 import re
-from typing import AsyncIterator, Dict, List
+from typing import AsyncIterator, Dict, List, Optional
 
 from app.config import get_settings
 from app.services import http as http_svc
@@ -177,6 +177,137 @@ def build_product_text(product: Dict) -> str:
         parts.append(" ".join(variant_titles))
 
     return " | ".join(parts)
+
+
+_LIVE_INVENTORY_QUERY = """
+query getProductsLive($ids: [ID!]!) {
+  nodes(ids: $ids) {
+    ... on Product {
+      id
+      totalInventory
+      variants(first: 50) {
+        edges {
+          node {
+            id
+            price
+            inventoryQuantity
+            availableForSale
+          }
+        }
+      }
+    }
+  }
+}
+""".strip()
+
+
+async def fetch_live_pricing_inventory(
+    product_ids: List[str],
+    timeout: float = 5.0,
+) -> Dict[str, Dict]:
+    """
+    Consulta a Shopify (GraphQL) precio + inventario en vivo para los productos
+    indicados. Devuelve un dict {product_id_str: {...}} con el shape:
+
+        {
+          "total_inventory": int | None,
+          "in_stock": bool,
+          "price_range": {"min": float, "max": float} | None,
+          "variants": [{"id": str, "price": float, "inventory_quantity": int,
+                        "available_for_sale": bool}, ...]
+        }
+
+    Productos no encontrados o que fallen no aparecen en el dict. Si la llamada
+    a Shopify falla completa retorna {}.
+    """
+    if not product_ids:
+        return {}
+
+    settings = get_settings()
+    if not settings.SHOPIFY_STORE_DOMAIN or not settings.SHOPIFY_ACCESS_TOKEN:
+        logger.warning("[SHOPIFY] Live fetch saltado: credenciales no configuradas")
+        return {}
+
+    gids = [f"gid://shopify/Product/{pid}" for pid in product_ids if pid]
+    if not gids:
+        return {}
+
+    client = http_svc.get_client()
+    url = f"{_base_url()}/graphql.json"
+    payload = {"query": _LIVE_INVENTORY_QUERY, "variables": {"ids": gids}}
+
+    try:
+        resp = await client.post(url, json=payload, headers=_headers(), timeout=timeout)
+    except Exception as e:
+        logger.warning("[SHOPIFY] Live fetch fallo (%s) — usando datos cacheados", e)
+        return {}
+
+    if resp.status_code != 200:
+        logger.warning(
+            "[SHOPIFY] Live fetch HTTP %d — %s",
+            resp.status_code, resp.text[:200],
+        )
+        return {}
+
+    try:
+        body = resp.json()
+    except ValueError:
+        logger.warning("[SHOPIFY] Live fetch: respuesta no es JSON")
+        return {}
+
+    if body.get("errors"):
+        logger.warning("[SHOPIFY] Live fetch GraphQL errors: %s", body["errors"])
+        return {}
+
+    nodes = (body.get("data") or {}).get("nodes") or []
+    result: Dict[str, Dict] = {}
+
+    for node in nodes:
+        if not node:
+            continue
+        gid = node.get("id") or ""
+        numeric_id = gid.rsplit("/", 1)[-1] if gid else ""
+        if not numeric_id:
+            continue
+
+        variants_out: List[Dict] = []
+        prices: List[float] = []
+        in_stock = False
+        for edge in (node.get("variants") or {}).get("edges") or []:
+            v = edge.get("node") or {}
+            price_val: Optional[float] = None
+            try:
+                price_val = float(v["price"]) if v.get("price") is not None else None
+            except (TypeError, ValueError):
+                price_val = None
+            inv = v.get("inventoryQuantity")
+            if isinstance(inv, int) and inv > 0:
+                in_stock = True
+            if price_val is not None:
+                prices.append(price_val)
+            variants_out.append({
+                "id": (v.get("id") or "").rsplit("/", 1)[-1],
+                "price": price_val,
+                "inventory_quantity": inv if isinstance(inv, int) else None,
+                "available_for_sale": bool(v.get("availableForSale")),
+            })
+
+        total_inv = node.get("totalInventory")
+        if isinstance(total_inv, int) and total_inv > 0:
+            in_stock = True
+
+        price_range: Optional[Dict[str, float]] = None
+        if prices:
+            price_range = {"min": min(prices), "max": max(prices)}
+
+        result[numeric_id] = {
+            "total_inventory": total_inv if isinstance(total_inv, int) else None,
+            "in_stock": in_stock,
+            "price_range": price_range,
+            "variants": variants_out,
+        }
+
+    return result
 
 
 async def actualizar_precio_variante(variant_id: str, price: str) -> bool:
