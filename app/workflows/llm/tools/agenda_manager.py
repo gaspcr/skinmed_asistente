@@ -8,8 +8,8 @@ y responda preguntas abiertas del gerente.
 Soporta filtros opcionales: doctor, solo_resumen.
 """
 import logging
-from datetime import datetime
-from typing import Any, Dict, List
+from datetime import datetime, timedelta
+from typing import Any, Dict, List, Optional, Tuple
 
 import pytz
 
@@ -36,6 +36,10 @@ TOOL_DEFINITION = {
             "nombre de doctor para ver solo su agenda. "
             "Usa solo_resumen=true para obtener solo el listado de "
             "doctores con su cantidad de citas (útil para consultas generales). "
+            "Para preguntas tipo '¿cuándo vuelve X?' o 'próximo día de trabajo "
+            "de X', pasa doctor + buscar_proximo_dia=true: el tool itera "
+            "internamente día a día desde `fecha` hasta encontrar el primer día "
+            "con citas de ese doctor (o agotar `max_dias`). "
             "IMPORTANTE: para fechas relativas ('mañana', 'próximo lunes'), "
             "primero usa calcular_fecha."
         ),
@@ -46,7 +50,9 @@ TOOL_DEFINITION = {
                     "type": "string",
                     "description": (
                         "Fecha en formato ISO YYYY-MM-DD. "
-                        "Si no se indica, se usa la fecha de hoy."
+                        "Si no se indica, se usa la fecha de hoy. "
+                        "Si buscar_proximo_dia=true, es el día desde donde "
+                        "empezar a iterar (inclusivo)."
                     ),
                 },
                 "doctor": {
@@ -54,7 +60,8 @@ TOOL_DEFINITION = {
                     "description": (
                         "Nombre (o parte del nombre) del doctor para filtrar. "
                         "Búsqueda flexible: 'Ramirez' encontrará 'Dra. Claudia Ramirez'. "
-                        "Si no se indica, se muestran todos los doctores."
+                        "Si no se indica, se muestran todos los doctores. "
+                        "OBLIGATORIO cuando buscar_proximo_dia=true."
                     ),
                 },
                 "solo_resumen": {
@@ -64,6 +71,25 @@ TOOL_DEFINITION = {
                         "sin el detalle de cada cita. Útil para preguntas como "
                         "'¿qué doctores vienen hoy?' o '¿cuántos pacientes tiene X?'."
                     ),
+                },
+                "buscar_proximo_dia": {
+                    "type": "boolean",
+                    "description": (
+                        "Si true (y se pasó `doctor`), itera día a día desde "
+                        "`fecha` hasta encontrar el primer día con citas válidas "
+                        "del doctor filtrado. Devuelve la agenda de ese día. "
+                        "Útil para '¿cuándo vuelve a trabajar el Dr. X?'. "
+                        "Default false."
+                    ),
+                },
+                "max_dias": {
+                    "type": "integer",
+                    "description": (
+                        "Solo aplica con buscar_proximo_dia=true. Máximo de "
+                        "días a iterar hacia adelante. Default 14, máximo 60."
+                    ),
+                    "minimum": 1,
+                    "maximum": 60,
                 },
             },
             "required": [],
@@ -152,6 +178,37 @@ def _formatear_detalle(doctors: Dict[str, List[Dict]], fecha_display: str) -> st
 
 
 # ──────────────────────────────────────────────
+# Iteración "próximo día de trabajo"
+# ──────────────────────────────────────────────
+
+async def _buscar_proximo_dia_con_citas(
+    filtro_doctor: str,
+    desde: datetime,
+    max_dias: int,
+) -> Tuple[Optional[datetime], Dict[str, List[Dict]]]:
+    """Itera día a día (desde `desde` inclusivo) hasta encontrar el primer día
+    con citas válidas para `filtro_doctor`. Retorna (fecha_encontrada, doctors)
+    o (None, {}) si no encuentra en los `max_dias` días siguientes."""
+    for offset in range(max_dias + 1):
+        check_date = desde + timedelta(days=offset)
+        filemaker_date = check_date.strftime("%m-%d-%Y")
+        all_data = await FileMakerService.get_agenda_all_doctors(filemaker_date)
+        valid_data = _filtrar_citas_validas(all_data or [])
+        doctors = _agrupar_por_doctor(valid_data)
+        filtered = {
+            name: citas for name, citas in doctors.items()
+            if _match_doctor(name, filtro_doctor)
+        }
+        logger.info(
+            "[AGENDA_MGR] proximo_dia iter +%d (%s): %d citas para '%s'",
+            offset, check_date.strftime("%d-%m-%Y"), len(filtered), filtro_doctor,
+        )
+        if filtered:
+            return check_date, filtered
+    return None, {}
+
+
+# ──────────────────────────────────────────────
 # Handler
 # ──────────────────────────────────────────────
 
@@ -163,6 +220,12 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
     fecha_input = arguments.get("fecha")
     filtro_doctor = arguments.get("doctor")
     solo_resumen = arguments.get("solo_resumen", False)
+    buscar_proximo_dia = bool(arguments.get("buscar_proximo_dia", False))
+    try:
+        max_dias = int(arguments.get("max_dias", 14))
+    except (TypeError, ValueError):
+        max_dias = 14
+    max_dias = max(1, min(max_dias, 60))
 
     # Resolver fecha
     tz = pytz.timezone("America/Santiago")
@@ -175,8 +238,37 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
             return "Formato de fecha inválido. Usa YYYY-MM-DD."
     else:
         now = datetime.now(tz)
+        date_obj = now.replace(hour=0, minute=0, second=0, microsecond=0)
         filemaker_date = now.strftime("%m-%d-%Y")
         fecha_display = now.strftime("%d-%m-%Y")
+
+    # Modo "próximo día de trabajo": itera adelante hasta encontrar citas.
+    if buscar_proximo_dia:
+        if not filtro_doctor:
+            return (
+                "Para usar buscar_proximo_dia debes pasar el parametro 'doctor'. "
+                "Sin filtro, 'proximo dia' no tiene sentido (todos los dias hay "
+                "actividad en la clinica)."
+            )
+        found_date, filtered_doctors = await _buscar_proximo_dia_con_citas(
+            filtro_doctor, date_obj, max_dias,
+        )
+        if not found_date:
+            return (
+                f"No se encontraron citas para '{filtro_doctor}' entre "
+                f"{date_obj.strftime('%d-%m-%Y')} y los proximos {max_dias} dias. "
+                f"El doctor puede estar de vacaciones, no trabajar en ese rango, "
+                f"o el filtro no coincide con ningun doctor (verifica el nombre)."
+            )
+        fecha_display = found_date.strftime("%d-%m-%Y")
+        if solo_resumen:
+            cuerpo = _formatear_resumen(filtered_doctors, fecha_display)
+        else:
+            cuerpo = _formatear_detalle(filtered_doctors, fecha_display)
+        return (
+            f"Proximo dia con citas para '{filtro_doctor}': {fecha_display}\n\n"
+            f"{cuerpo}"
+        )
 
     # Consultar FileMaker
     all_data = await FileMakerService.get_agenda_all_doctors(filemaker_date)
@@ -226,12 +318,16 @@ async def handle(user, phone: str, arguments: Dict[str, Any]) -> str:
             filtro_doctor, len(filtered), len(filtered_bloqueados),
         )
         if not filtered and not filtered_bloqueados:
-            # Sugerir doctores similares
             all_names = list(set(list(doctors.keys()) + list(bloqueados_dict.keys())))
             return (
-                f"No se encontró un doctor que coincida con '{filtro_doctor}' "
-                f"en la agenda del {fecha_display}.\n"
-                f"Doctores disponibles/bloqueados: {', '.join(sorted(all_names))}"
+                f"'{filtro_doctor}' NO tiene citas ni bloqueos el "
+                f"{fecha_display}. Esto NO significa que el doctor no exista "
+                f"o no trabaje en la clinica — solo que no tiene actividad ese "
+                f"dia especifico (puede ser dia libre, vacaciones, etc.).\n\n"
+                f"Doctores CON ACTIVIDAD ese dia: "
+                f"{', '.join(sorted(all_names)) if all_names else '(ninguno)'}.\n\n"
+                f"Si quieres saber cuando vuelve a trabajar ese doctor, vuelve "
+                f"a llamar a consultar_agenda con buscar_proximo_dia=true."
             )
         doctors = filtered
         bloqueados_dict = filtered_bloqueados
