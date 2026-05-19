@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     SHOPIFY_STORE_DOMAIN: str = Field(default="", description="Dominio de la tienda Shopify (ej. skinmed.myshopify.com)")
     SHOPIFY_ACCESS_TOKEN: str = Field(default="", description="Token de la Custom App de Shopify")
 
+    # --- PostgreSQL (vector DB para productos y knowledge base) ---
+    DATABASE_URL: str = Field(default="", description="URL de conexion a PostgreSQL (Railway con pgvector)")
+    PG_POOL_MIN_SIZE: int = Field(default=1, description="Conexiones minimas en el pool de Postgres")
+    PG_POOL_MAX_SIZE: int = Field(default=5, description="Conexiones maximas en el pool de Postgres")
+
     # --- Rate Limiting ---
     RATE_LIMIT_MAX: int = Field(default=30, description="Maximo de mensajes por ventana de rate limit")
     RATE_LIMIT_WINDOW: int = Field(default=60, description="Ventana de rate limit en segundos")

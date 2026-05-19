@@ -11,6 +11,7 @@ from app.auth.service import AuthService
 from app.services.whatsapp import WhatsAppService
 from app.services import redis as redis_svc
 from app.services import http as http_svc
+from app.services import postgres as pg_svc
 from app.middleware import verify_signature, SecurityHeadersMiddleware
 from app.exceptions import ServicioNoDisponibleError
 from app.workflows import doctor, manager, hybrid
@@ -33,6 +34,11 @@ async def lifespan(app: FastAPI):
     validate()
     await redis_svc.init(settings.REDIS_URL)
     await http_svc.init()
+    await pg_svc.init(
+        settings.DATABASE_URL,
+        min_size=settings.PG_POOL_MIN_SIZE,
+        max_size=settings.PG_POOL_MAX_SIZE,
+    )
     await price_scheduler.init_scheduler()
     logger.info("Servicios inicializados correctamente")
 
@@ -40,6 +46,7 @@ async def lifespan(app: FastAPI):
 
     # --- Shutdown ---
     price_scheduler.shutdown_scheduler()
+    await pg_svc.close()
     await http_svc.close()
     await redis_svc.close()
     logger.info("Servicios cerrados correctamente")
@@ -118,6 +125,19 @@ async def readiness_check():
     except Exception as e:
         estado["servicios"]["filemaker"] = f"error: {e}"
         estado["status"] = "degraded"
+
+    # Check Postgres (opcional: si no esta configurado, no degrada)
+    settings = get_settings()
+    if settings.DATABASE_URL:
+        try:
+            estado["servicios"]["postgres"] = "ok" if await pg_svc.ping() else "error: ping fallo"
+            if estado["servicios"]["postgres"] != "ok":
+                estado["status"] = "degraded"
+        except Exception as e:
+            estado["servicios"]["postgres"] = f"error: {e}"
+            estado["status"] = "degraded"
+    else:
+        estado["servicios"]["postgres"] = "not_configured"
 
     status_code = 200 if estado["status"] == "ok" else 503
     return JSONResponse(content=estado, status_code=status_code)

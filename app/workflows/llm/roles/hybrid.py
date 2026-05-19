@@ -26,6 +26,7 @@ from app.workflows.llm.tools import recados as tool_recados
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
 from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
 from app.workflows.llm.tools import price_update as tool_price_update
+from app.workflows.llm.tools import products as tool_products
 
 
 # ──────────────────────────────────────────────
@@ -63,6 +64,7 @@ Tienes acceso a las siguientes funciones:
 5. **Consultar agenda** (análisis): Datos de todos los doctores o uno específico para preguntas analíticas (comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.)
 6. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de cualquier doctor con glosario.
 7. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
+8. **Buscar productos**: Busca productos del catálogo Shopify por intención en lenguaje natural (sinónimos, descripciones vagas, marca parcial). Úsala cuando alguien pregunte si existe un producto.
 
 Categorías de recados disponibles:
 - "Agendar paciente": Para solicitar que se agende un paciente.
@@ -77,6 +79,7 @@ Reglas importantes:
 - Para VER la agenda formateada de un doctor específico → usa ver_agenda_doctor.
 - Para ANALIZAR datos de agendas → usa consultar_agenda.
 - Cuando el usuario quiera actualizar, cambiar o modificar precios de la tienda masivamente, usa iniciar_actualizacion_precios. Esta función iniciará el flujo para recibir el CSV.
+- Cuando se pregunte si la tienda tiene un producto o se busque algo específico ("¿tienen X?", "busco algo para Y"), usa buscar_productos. NO adivines el catálogo de memoria.
 - Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario pide una acción concreta que no puedes hacer. Saludos y conversación casual NO son fallback.
 - Después de responder una consulta, pregunta amablemente si necesita algo más.
@@ -98,6 +101,7 @@ _TOOLS = [
     tool_agenda_mgr.TOOL_DEFINITION,   # consultar_agenda (gerencia - análisis)
     tool_ver_agenda.TOOL_DEFINITION,   # ver_agenda_doctor (gerencia - mostrar)
     tool_price_update.TOOL_DEFINITION, # iniciar_actualizacion_precios
+    tool_products.TOOL_DEFINITION,     # buscar_productos
 ]
 
 _TOOL_HANDLERS = {
@@ -108,6 +112,7 @@ _TOOL_HANDLERS = {
     "consultar_agenda":              tool_agenda_mgr.handle,
     "ver_agenda_doctor":             tool_ver_agenda.handle,
     "iniciar_actualizacion_precios": tool_price_update.handle,
+    "buscar_productos":              tool_products.handle,
 }
 
 
