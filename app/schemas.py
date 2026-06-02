@@ -23,12 +23,19 @@ class Interactive(BaseModel):
     type: str
     button_reply: Optional[ButtonReply] = None
 
+class DocumentoWsp(BaseModel):
+    id: str
+    mime_type: Optional[str] = None
+    filename: Optional[str] = None
+    caption: Optional[str] = None
+
 class Message(BaseModel):
-    sender_phone: str = Field(alias="from") 
+    sender_phone: str = Field(alias="from")
     id: str
     text: Optional[Text] = None
     interactive: Optional[Interactive] = None
     button: Optional[Button] = None
+    document: Optional[DocumentoWsp] = None
     type: str
 
     model_config = {"populate_by_name": True}

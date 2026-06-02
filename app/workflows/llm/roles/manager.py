@@ -16,6 +16,8 @@ from app.workflows.llm.config import RoleLLMConfig, register_llm_config
 from app.workflows.llm.tools import shared as tool_shared
 from app.workflows.llm.tools import agenda_manager as tool_agenda_mgr
 from app.workflows.llm.tools import ver_agenda_doctor as tool_ver_agenda
+from app.workflows.llm.tools import price_update as tool_price_update
+from app.workflows.llm.tools import products as tool_products
 
 
 # ──────────────────────────────────────────────
@@ -42,6 +44,9 @@ Tienes acceso a las siguientes funciones:
 1. **Calcular fecha**: Convierte fechas relativas ("mañana", "próximo miércoles") a fecha exacta.
 2. **Consultar agenda** (análisis): Trae datos de todos los doctores o uno específico. Úsala para preguntas analíticas: comparaciones, ocupación, horarios de tope, quién llega más temprano, cuántas citas tiene X, etc.
 3. **Ver agenda doctor** (mostrar): Formatea y envía la agenda completa de UN doctor con glosario de procedimientos. Úsala cuando el usuario pida VER o mostrar la agenda de un doctor específico.
+4. **Actualizar precios masivamente**: Iniciar el flujo para actualizar precios de la tienda vía CSV de Shopify (para Cyber Days u otros eventos).
+5. **Buscar productos**: Busca productos del catálogo Shopify por intención en lenguaje natural (sinónimos, descripciones vagas, marca parcial). Úsala cuando el usuario pregunte si existe un producto o esté buscando algo específico de la tienda.
+6. **Listar productos**: Lista productos por filtros exactos (marca/vendor, tipo, tag, con/sin stock). Úsala cuando el usuario pida "todos los X", "qué productos de la marca Y", listados por categoría/etiqueta o por stock, etc. No usa relevancia: devuelve TODOS los que matchean.
 
 Reglas importantes:
 - IMPORTANTE: Cuando el usuario mencione fechas relativas ("mañana", "el lunes", "próximo miércoles", etc.), SIEMPRE usa primero la función calcular_fecha para obtener la fecha exacta. NUNCA intentes calcular fechas por tu cuenta.
@@ -50,9 +55,12 @@ Reglas importantes:
 - Para preguntas generales ("¿qué doctores vienen hoy?"), usa consultar_agenda con solo_resumen=true.
 - Para análisis específico de un doctor ("¿cuántas citas tiene X en la tarde?", "¿a qué hora entra Y?"), usa consultar_agenda con el filtro doctor.
 - Para buscar un doctor específico usa su apellido como filtro (ej: "Fernanda" para "Dra. Fernanda Cuca R").
-- Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades. Esto NO es un fallback.
+- Cuando el usuario quiera actualizar, cambiar o modificar precios de la tienda masivamente, usa iniciar_actualizacion_precios. Esta función iniciará el flujo para recibir el CSV.
+- Cuando el usuario pregunte si la tienda tiene un producto, busque algo específico, mencione síntomas o necesidades cosméticas/dermatológicas relacionadas con productos ("¿tienen algo para acné?", "busco un protector solar"), usa buscar_productos. Esta función maneja sinónimos y descripciones vagas — NO intentes adivinar el catálogo de memoria.
+- Para preguntas de LISTADO/INVENTARIO ("¿qué productos tenemos de SkinCeuticals?", "todos los productos con stock", "lista de cremas antiedad", "qué tenemos con tag Vitamina C") usa listar_productos con los filtros correspondientes (vendor/product_type/tag, opcionalmente in_stock_only). NO uses buscar_productos para listados — ese tool ranquea por relevancia y limita a 10.
+- Si el usuario te saluda o pregunta qué puedes hacer, responde amablemente listando tus capacidades (agenda, ocupación, actualizar precios de la tienda). Esto NO es un fallback.
 - SOLO usa el prefijo "[FALLBACK]" si el usuario te pide realizar una acción concreta que NO puedes hacer con tus funciones. Saludos, preguntas generales y conversación casual NO son fallback.
-- Después de responder una consulta, pregunta amablemente si necesita algo más.
+- Responde estrictamente lo consultado. NO cierres con "¿necesita algo más?", NO ofrezcas acciones adicionales no solicitadas ("si quiere, también puedo…", "si me dice X, le indico Y"), NO sugieras follow-ups. Limítate a la respuesta directa de lo que pidió el usuario.
 - No inventes información. Solo reporta lo que devuelven las funciones.
 - Sé breve pero completo. Los mensajes de WhatsApp deben ser concisos.
 - Usa formato WhatsApp: *negrita*, _cursiva_ cuando sea apropiado.
@@ -69,12 +77,18 @@ _TOOLS = [
     tool_shared.TOOL_DEFINITION,
     tool_agenda_mgr.TOOL_DEFINITION,
     tool_ver_agenda.TOOL_DEFINITION,
+    tool_price_update.TOOL_DEFINITION,
+    tool_products.TOOL_DEFINITION,
+    tool_products.LISTAR_TOOL_DEFINITION,
 ]
 
 _TOOL_HANDLERS = {
     "calcular_fecha": tool_shared.handle,
     "consultar_agenda": tool_agenda_mgr.handle,
     "ver_agenda_doctor": tool_ver_agenda.handle,
+    "iniciar_actualizacion_precios": tool_price_update.handle,
+    "buscar_productos": tool_products.handle,
+    "listar_productos": tool_products.handle_listar,
 }
 
 
