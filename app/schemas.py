@@ -6,10 +6,13 @@ class Text(BaseModel):
 
 class Profile(BaseModel):
     name: str
+    username: Optional[str] = None
 
 class Contact(BaseModel):
     profile: Optional[Profile] = None
-    wa_id: str
+    wa_id: Optional[str] = None
+    user_id: Optional[str] = None
+    parent_user_id: Optional[str] = None
 
 class Button(BaseModel):
     text: str
@@ -30,7 +33,9 @@ class DocumentoWsp(BaseModel):
     caption: Optional[str] = None
 
 class Message(BaseModel):
-    sender_phone: str = Field(alias="from")
+    sender_phone: Optional[str] = Field(default=None, alias="from")
+    from_user_id: Optional[str] = None
+    from_parent_user_id: Optional[str] = None
     id: str
     text: Optional[Text] = None
     interactive: Optional[Interactive] = None
