@@ -13,7 +13,6 @@ from fastapi import HTTPException, Request, Response
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.config import get_settings
-from app.schemas import WSPPayload
 
 logger = logging.getLogger(__name__)
 
@@ -21,10 +20,12 @@ logger = logging.getLogger(__name__)
 # --- HMAC Webhook Verification ---
 
 
-async def verify_signature(request: Request) -> WSPPayload:
+async def verify_signature(request: Request) -> bytes:
     """
     Dependencia de FastAPI que verifica la firma HMAC-SHA256 del webhook.
-    Retorna el payload parseado si la firma es valida.
+    Retorna el body crudo (bytes) si la firma es valida; el parseo del
+    payload queda a cargo del handler, para poder responder 200 aun si
+    el shape del payload es inesperado (ver main.py:webhook).
     Lanza HTTPException(403) si la firma es invalida o falta.
     """
     body = await request.body()
@@ -50,8 +51,7 @@ async def verify_signature(request: Request) -> WSPPayload:
         logger.warning("Firma HMAC invalida en webhook")
         raise HTTPException(status_code=403, detail="Firma invalida")
 
-    payload = WSPPayload.model_validate_json(body)
-    return payload
+    return body
 
 
 # --- Security Headers Middleware ---

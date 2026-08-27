@@ -164,6 +164,14 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
     settings = get_settings()
     sender_phone = msg.sender_phone
 
+    if not sender_phone:
+        logger.warning(
+            "[MAIN] Mensaje sin telefono (usuario con username de WhatsApp sin "
+            "interaccion reciente); no se puede identificar. from_user_id=%s",
+            msg.from_user_id,
+        )
+        return
+
     try:
         # Rate limiting
         permitido = await redis_svc.verificar_rate_limit(
@@ -252,11 +260,15 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
 
 @app.post("/webhook")
 async def webhook(
-    payload: WSPPayload = Depends(verify_signature),
+    body: bytes = Depends(verify_signature),
     background_tasks: BackgroundTasks = None,
 ):
     """Recibe y procesa mensajes del webhook de WhatsApp."""
     try:
+        # Parseo del payload dentro del try: si Meta manda un shape
+        # inesperado (p. ej. campos nuevos de BSUID/usernames), respondemos
+        # 200 igual en vez de un 500 no controlado, para evitar reintentos.
+        payload = WSPPayload.model_validate_json(body)
         change = payload.entry[0].changes[0].value
 
         if change.messages:
@@ -274,6 +286,9 @@ async def webhook(
 
             # Procesar mensaje en background para responder rapido
             await _process_message(msg, background_tasks)
+        else:
+            field = payload.entry[0].changes[0].field
+            logger.debug("Webhook sin mensajes, field='%s'", field)
 
     except Exception as e:
         logger.exception("Error en webhook")
