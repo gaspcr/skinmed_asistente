@@ -9,7 +9,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 # Importar workflows para activar decoradores
-from app.workflows import doctor, manager, hybrid
+from app.workflows import doctor, manager, hybrid, tens
 from app.workflows.llm.config import get_registered_llm_roles, get_llm_config
 from app.workflows.role_registry import (
     get_registered_roles, 
@@ -31,7 +31,7 @@ def test_role_registry():
     print(f"Total: {len(registered_roles)} roles")
     print()
     
-    expected_roles = ['medico', 'gerencia', 'medico_gerencia']
+    expected_roles = ['medico', 'gerencia', 'medico_gerencia', 'tens']
     missing_roles = [r for r in expected_roles if r not in registered_roles]
     
     if missing_roles:

@@ -19,3 +19,11 @@ class WorkflowHandler(ABC):
             phone,
             "Este tipo de archivo no está disponible en tu rol."
         )
+
+    async def handle_image(self, user, phone: str, image):
+        """Handle image message — rechaza por defecto; los roles que lo soporten deben sobreescribir."""
+        from app.services.whatsapp import WhatsAppService
+        await WhatsAppService.send_message(
+            phone,
+            "Este tipo de archivo no está disponible en tu rol."
+        )
