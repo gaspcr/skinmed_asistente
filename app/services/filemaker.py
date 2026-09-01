@@ -134,6 +134,29 @@ class FileMakerService:
         return resp
 
     @classmethod
+    async def _fm_get_record(cls, layout: str, record_id: str, intentar_reauth: bool = True) -> httpx.Response:
+        """
+        Obtiene un registro por su recordId (util para leer campos auto-enter,
+        como un serial, que la respuesta de creacion no incluye).
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        settings = get_settings()
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/layouts/{layout}/records/{record_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        async with _fm_circuit_breaker:
+            resp = await client.get(url, headers=headers)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_get_record(layout, record_id, intentar_reauth=False)
+
+        return resp
+
+    @classmethod
     async def _fm_upload_container(
         cls,
         layout: str,
@@ -566,30 +589,56 @@ class FileMakerService:
         responsable: str,
     ) -> bool:
         """
-        Crea un nuevo registro de foto para el paciente y sube el binario
-        al campo contenedor 'Foto'.
+        Crea el registro 'set' (padre, SetFotosPaciente) para el paciente,
+        crea el registro de foto individual (hijo, FotosPaciente) enlazado
+        al set, y sube el binario al campo contenedor 'Foto' de ese hijo.
+
+        Nota: FotosPaciente::Paciente_fk es un campo Lookup derivado de la
+        relacion con SetFotosPaciente, por lo que no se escribe directamente
+        aqui - se completa solo al enlazar via SetFotosPaciente_fk.
         """
         settings = get_settings()
         tz = pytz.timezone("America/Santiago")
         hoy_str = datetime.now(tz).strftime("%m-%d-%Y")
 
-        field_data = {
+        set_field_data = {
             "Paciente_fk": paciente_fk,
             "Fecha Toma": hoy_str,
             "Responsable de toma de fotos": responsable,
+            "Nombre Set": "Foto WhatsApp (TENS)",
         }
 
         async def _subir():
-            resp = await FileMakerService._fm_create_record(settings.FM_FOTOS_LAYOUT, field_data)
-            if resp.status_code not in (200, 201):
+            # 1. Crear el registro "set" (padre)
+            resp_set = await FileMakerService._fm_create_record(settings.FM_FOTOS_SET_LAYOUT, set_field_data)
+            if resp_set.status_code not in (200, 201):
                 raise ServicioNoDisponibleError(
-                    "FileMaker", f"subir_foto_paciente (crear registro): HTTP {resp.status_code}"
+                    "FileMaker", f"subir_foto_paciente (crear set): HTTP {resp_set.status_code}"
                 )
+            set_record_id = resp_set.json()['response']['recordId']
 
-            record_id = resp.json()['response']['recordId']
+            # 2. Leer el registro recien creado para obtener su PK (serial
+            #    auto-enter, no viene en la respuesta de creacion) y poder
+            #    enlazar el hijo via SetFotosPaciente_fk
+            resp_get = await FileMakerService._fm_get_record(settings.FM_FOTOS_SET_LAYOUT, set_record_id)
+            if resp_get.status_code != 200:
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"subir_foto_paciente (leer set): HTTP {resp_get.status_code}"
+                )
+            set_pk = resp_get.json()['response']['data'][0]['fieldData']['SetFotosPacientes_pk']
 
+            # 3. Crear el registro de foto individual (hijo), enlazado al set
+            foto_field_data = {"SetFotosPaciente_fk": set_pk}
+            resp_foto = await FileMakerService._fm_create_record(settings.FM_FOTOS_LAYOUT, foto_field_data)
+            if resp_foto.status_code not in (200, 201):
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"subir_foto_paciente (crear foto): HTTP {resp_foto.status_code}"
+                )
+            foto_record_id = resp_foto.json()['response']['recordId']
+
+            # 4. Subir el binario al contenedor 'Foto' del hijo
             resp_container = await FileMakerService._fm_upload_container(
-                settings.FM_FOTOS_LAYOUT, record_id, "Foto", contenido, filename, content_type
+                settings.FM_FOTOS_LAYOUT, foto_record_id, "Foto", contenido, filename, content_type
             )
             if resp_container.status_code not in (200, 201):
                 raise ServicioNoDisponibleError(

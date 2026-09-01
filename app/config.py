@@ -25,7 +25,8 @@ class Settings(BaseSettings):
     FM_PACIENTES_LAYOUT: str = Field(default="ListadoPacientes_dapi", description="Layout de pacientes en FileMaker")
     FM_DIAS_BLOQUEADOS_LAYOUT: str = Field(default="ListadoDiasBloqueadosDoctores_dapi", description="Layout de dias bloqueados en FileMaker")
     FM_TOKENS_FOTO_LAYOUT: str = Field(default="TokensFoto_dapi", description="Layout del bridge de tokens de foto (rol tens) en FileMaker")
-    FM_FOTOS_LAYOUT: str = Field(default="SetFotosPaciente_dapi", description="Layout para crear registros de fotos de paciente en FileMaker")
+    FM_FOTOS_SET_LAYOUT: str = Field(default="SetFotosPaciente_dapi", description="Layout para crear el registro 'set' de fotos (padre) en FileMaker")
+    FM_FOTOS_LAYOUT: str = Field(default="FotosPaciente_dapi", description="Layout para crear el registro de foto individual (hijo, con el contenedor Foto) en FileMaker")
 
     # --- WhatsApp ---
     WSP_TOKEN: str = Field(description="Token de WhatsApp Business API")
