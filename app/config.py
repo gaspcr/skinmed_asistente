@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     # --- Endpoints internos (FileMaker -> servidor) ---
     INTERNAL_API_KEY: str = Field(description="Secreto compartido para autenticar endpoints internos (ej. disparo de solicitud de foto desde FileMaker)")
     TENS_TOKEN_TTL_SECONDS: int = Field(default=600, description="TTL en segundos del estado de espera de foto del rol tens (debe calzar con la expiracion del token en FileMaker)")
+    TENS_FOTO_ROLES_PERMITIDOS: str = Field(
+        default="tens,gerencia",
+        description="Roles autorizados a recibir y completar una solicitud de foto via el flujo tens (separados por coma)",
+    )
 
     # --- Redis ---
     REDIS_URL: str = Field(default="redis://localhost:6379/0", description="URL de conexion a Redis")
@@ -99,6 +103,11 @@ class Settings(BaseSettings):
     def llm_has_legacy_fallback(self, role: str) -> bool:
         """Verifica si un rol tiene fallback a legacy habilitado."""
         roles = {r.strip().lower() for r in self.LLM_LEGACY_FALLBACK_ROLES.split(",") if r.strip()}
+        return role.lower().strip() in roles
+
+    def tens_foto_rol_permitido(self, role: str) -> bool:
+        """Verifica si un rol puede recibir/completar una solicitud de foto (rol tens)."""
+        roles = {r.strip().lower() for r in self.TENS_FOTO_ROLES_PERMITIDOS.split(",") if r.strip()}
         return role.lower().strip() in roles
 
     def llm_is_in_maintenance(self, role: str, phone: str) -> bool:

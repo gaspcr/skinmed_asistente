@@ -318,10 +318,11 @@ async def solicitar_foto_tens(
     """
     settings = get_settings()
 
-    # Defensa en profundidad: confirmar que el telefono corresponde a un TENS
+    # Defensa en profundidad: confirmar que el telefono corresponde a un rol
+    # autorizado a recibir/completar solicitudes de foto (ver TENS_FOTO_ROLES_PERMITIDOS)
     tens_user = await AuthService.get_user_by_phone(body.telefono)
-    if not tens_user or tens_user.role != "tens":
-        raise HTTPException(status_code=404, detail="Telefono no corresponde a un usuario TENS")
+    if not tens_user or not settings.tens_foto_rol_permitido(tens_user.role):
+        raise HTTPException(status_code=404, detail="Telefono no corresponde a un usuario autorizado para recibir solicitudes de foto")
 
     await workflow_state.set_state(
         body.telefono,
