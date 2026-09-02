@@ -1,5 +1,6 @@
 import logging
 from datetime import datetime
+from typing import Optional
 
 import httpx
 import pytz
@@ -107,6 +108,88 @@ class FileMakerService:
             logger.info("Token FM expirado, refrescando...")
             await cls.get_token(force_refresh=True)
             return await cls._fm_create_record(layout, field_data, intentar_reauth=False)
+
+        return resp
+
+    @classmethod
+    async def _fm_delete_record(cls, layout: str, record_id: str, intentar_reauth: bool = True) -> httpx.Response:
+        """
+        Elimina un registro en FileMaker con reintento automatico de token.
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        settings = get_settings()
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/layouts/{layout}/records/{record_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        async with _fm_circuit_breaker:
+            resp = await client.delete(url, headers=headers)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_delete_record(layout, record_id, intentar_reauth=False)
+
+        return resp
+
+    @classmethod
+    async def _fm_get_record(cls, layout: str, record_id: str, intentar_reauth: bool = True) -> httpx.Response:
+        """
+        Obtiene un registro por su recordId (util para leer campos auto-enter,
+        como un serial, que la respuesta de creacion no incluye).
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        settings = get_settings()
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/layouts/{layout}/records/{record_id}"
+        headers = {"Authorization": f"Bearer {token}"}
+
+        async with _fm_circuit_breaker:
+            resp = await client.get(url, headers=headers)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_get_record(layout, record_id, intentar_reauth=False)
+
+        return resp
+
+    @classmethod
+    async def _fm_upload_container(
+        cls,
+        layout: str,
+        record_id: str,
+        field_name: str,
+        contenido: bytes,
+        filename: str,
+        content_type: str,
+        intentar_reauth: bool = True,
+    ) -> httpx.Response:
+        """
+        Sube un archivo binario a un campo contenedor de FileMaker.
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        settings = get_settings()
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = (
+            f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}"
+            f"/layouts/{layout}/records/{record_id}/containers/{field_name}"
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        files = {"upload": (filename, contenido, content_type)}
+
+        async with _fm_circuit_breaker:
+            resp = await client.post(url, headers=headers, files=files)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_upload_container(
+                layout, record_id, field_name, contenido, filename, content_type, intentar_reauth=False
+            )
 
         return resp
 
@@ -407,4 +490,175 @@ class FileMakerService:
             raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
         except Exception as e:
             logger.error("Error inesperado al buscar paciente: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
+    async def resolver_token_foto(token: str) -> Optional[dict]:
+        """
+        Busca un token vigente en la tabla puente de fotos (rol tens).
+        La condicion de expiracion se evalua en la propia query de FileMaker
+        (Expiracion > ahora), asi que un token vencido simplemente no matchea.
+
+        Returns:
+            {"paciente_fk": ..., "record_id": ...} o None si no hay match.
+        """
+        settings = get_settings()
+        tz = pytz.timezone("America/Santiago")
+        ahora_str = datetime.now(tz).strftime("%m-%d-%Y %H:%M:%S")
+
+        query = {
+            "query": [
+                {
+                    "Token": f"=={token}",
+                    "Expiracion": f">{ahora_str}",
+                }
+            ]
+        }
+
+        async def _buscar():
+            resp = await FileMakerService._fm_find(settings.FM_TOKENS_FOTO_LAYOUT, query)
+
+            if resp.status_code == 200:
+                data = resp.json()['response']['data']
+                if data:
+                    record = data[0]
+                    return {
+                        "paciente_fk": record['fieldData'].get('Paciente_fk'),
+                        "record_id": record.get('recordId'),
+                    }
+                return None
+
+            if resp.status_code == 500 and _es_sin_registros(resp):
+                return None
+
+            raise ServicioNoDisponibleError("FileMaker", f"resolver_token_foto: HTTP {resp.status_code}")
+
+        try:
+            return await con_reintentos(
+                _buscar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker resolver_token_foto",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al resolver token de foto: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
+    async def invalidar_token_foto(record_id: str) -> bool:
+        """Elimina permanentemente el registro puente de un token de foto ya usado."""
+        settings = get_settings()
+
+        async def _eliminar():
+            resp = await FileMakerService._fm_delete_record(settings.FM_TOKENS_FOTO_LAYOUT, record_id)
+            if resp.status_code == 200:
+                return True
+            raise ServicioNoDisponibleError(
+                "FileMaker", f"invalidar_token_foto: HTTP {resp.status_code}"
+            )
+
+        try:
+            return await con_reintentos(
+                _eliminar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker invalidar_token_foto",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al invalidar token de foto: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
+    async def subir_foto_paciente(
+        paciente_fk: str,
+        contenido: bytes,
+        filename: str,
+        content_type: str,
+        responsable: str,
+    ) -> bool:
+        """
+        Crea el registro 'set' (padre, SetFotosPaciente) para el paciente,
+        crea el registro de foto individual (hijo, FotosPaciente) enlazado
+        al set, y sube el binario al campo contenedor 'Foto' de ese hijo.
+
+        Nota: FotosPaciente::Paciente_fk es un campo Lookup derivado de la
+        relacion con SetFotosPaciente, por lo que no se escribe directamente
+        aqui - se completa solo al enlazar via SetFotosPaciente_fk.
+        """
+        settings = get_settings()
+        tz = pytz.timezone("America/Santiago")
+        hoy_str = datetime.now(tz).strftime("%m-%d-%Y")
+
+        set_field_data = {
+            "Paciente_fk": paciente_fk,
+            "Fecha Toma": hoy_str,
+            "Responsable de toma de fotos": responsable,
+            "Nombre Set": "Foto WhatsApp (TENS)",
+        }
+
+        async def _subir():
+            # 1. Crear el registro "set" (padre)
+            resp_set = await FileMakerService._fm_create_record(settings.FM_FOTOS_SET_LAYOUT, set_field_data)
+            if resp_set.status_code not in (200, 201):
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"subir_foto_paciente (crear set): HTTP {resp_set.status_code}"
+                )
+            set_record_id = resp_set.json()['response']['recordId']
+
+            # 2. Leer el registro recien creado para obtener su PK (serial
+            #    auto-enter, no viene en la respuesta de creacion) y poder
+            #    enlazar el hijo via SetFotosPaciente_fk
+            resp_get = await FileMakerService._fm_get_record(settings.FM_FOTOS_SET_LAYOUT, set_record_id)
+            if resp_get.status_code != 200:
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"subir_foto_paciente (leer set): HTTP {resp_get.status_code}"
+                )
+            set_pk = resp_get.json()['response']['data'][0]['fieldData']['SetFotosPacientes_pk']
+
+            # 3. Crear el registro de foto individual (hijo), enlazado al set
+            foto_field_data = {"SetFotosPaciente_fk": set_pk}
+            resp_foto = await FileMakerService._fm_create_record(settings.FM_FOTOS_LAYOUT, foto_field_data)
+            if resp_foto.status_code not in (200, 201):
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"subir_foto_paciente (crear foto): HTTP {resp_foto.status_code}"
+                )
+            foto_record_id = resp_foto.json()['response']['recordId']
+
+            # 4. Subir el binario al contenedor 'Foto' del hijo
+            resp_container = await FileMakerService._fm_upload_container(
+                settings.FM_FOTOS_LAYOUT, foto_record_id, "Foto", contenido, filename, content_type
+            )
+            if resp_container.status_code not in (200, 201):
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"subir_foto_paciente (subir contenedor): HTTP {resp_container.status_code}"
+                )
+            return True
+
+        try:
+            return await con_reintentos(
+                _subir,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker subir_foto_paciente",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al subir foto de paciente: %s", e)
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")

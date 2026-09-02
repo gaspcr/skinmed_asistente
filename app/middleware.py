@@ -54,6 +54,24 @@ async def verify_signature(request: Request) -> bytes:
     return body
 
 
+# --- Autenticacion de endpoints internos ---
+
+
+async def verify_internal_api_key(request: Request) -> None:
+    """
+    Dependencia de FastAPI para endpoints internos llamados por sistemas
+    de confianza (ej. FileMaker), no por el webhook de WhatsApp.
+    Verifica un secreto compartido en el header X-Internal-Token.
+    Lanza HTTPException(403) si falta o no coincide.
+    """
+    token_recibido = request.headers.get("X-Internal-Token", "")
+    token_esperado = get_settings().INTERNAL_API_KEY
+
+    if not token_recibido or not hmac.compare_digest(token_recibido, token_esperado):
+        logger.warning("Solicitud a endpoint interno con token invalido o ausente")
+        raise HTTPException(status_code=403, detail="Token interno invalido")
+
+
 # --- Security Headers Middleware ---
 
 

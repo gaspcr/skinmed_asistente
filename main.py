@@ -6,23 +6,24 @@ from fastapi.responses import JSONResponse
 
 from app.config import get_settings, validate
 from app.logging_config import setup_logging
-from app.schemas import WSPPayload
+from app.schemas import WSPPayload, SolicitudFotoRequest
 from app.auth.service import AuthService
 from app.services.whatsapp import WhatsAppService
 from app.services import redis as redis_svc
 from app.services import http as http_svc
 from app.services import postgres as pg_svc
-from app.middleware import verify_signature, SecurityHeadersMiddleware
+from app.middleware import verify_signature, verify_internal_api_key, SecurityHeadersMiddleware
 from app.exceptions import ServicioNoDisponibleError
-from app.workflows import doctor, manager, hybrid
+from app.workflows import doctor, manager, hybrid, tens
 from app.workflows.role_registry import get_workflow_handler
 from app.workflows import session_timer
+from app.workflows import state as workflow_state
 from app.services import price_scheduler
 
 logger = logging.getLogger(__name__)
 
 # Tipos de mensaje soportados por el bot
-TIPOS_MENSAJE_SOPORTADOS = {"text", "interactive", "button", "document"}
+TIPOS_MENSAJE_SOPORTADOS = {"text", "interactive", "button", "document", "image"}
 
 
 @asynccontextmanager
@@ -245,6 +246,12 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
                         getattr(msg.document, "mime_type", "?"))
             await handler.handle_document(user, sender_phone, msg.document)
 
+        elif msg.type == "image":
+            logger.info("[MAIN] Imagen recibida de %s: mime=%s",
+                        sender_phone,
+                        getattr(msg.image, "mime_type", "?"))
+            await handler.handle_image(user, sender_phone, msg.image)
+
     except ServicioNoDisponibleError as e:
         logger.error("Servicio externo no disponible: %s", e)
         try:
@@ -293,4 +300,39 @@ async def webhook(
     except Exception as e:
         logger.exception("Error en webhook")
 
+    return {"status": "ok"}
+
+
+# --- Endpoints internos ---
+
+
+@app.post("/internal/tens/solicitud-foto")
+async def solicitar_foto_tens(
+    body: SolicitudFotoRequest,
+    _=Depends(verify_internal_api_key),
+):
+    """
+    Endpoint interno llamado por el script de FileMaker para disparar la
+    solicitud de foto al TENS. Recibe solo el token (UUID) y el telefono;
+    nunca datos identificables del paciente.
+    """
+    settings = get_settings()
+
+    # Defensa en profundidad: confirmar que el telefono corresponde a un rol
+    # autorizado a recibir/completar solicitudes de foto (ver TENS_FOTO_ROLES_PERMITIDOS)
+    tens_user = await AuthService.get_user_by_phone(body.telefono)
+    if not tens_user or not settings.tens_foto_rol_permitido(tens_user.role):
+        raise HTTPException(status_code=404, detail="Telefono no corresponde a un usuario autorizado para recibir solicitudes de foto")
+
+    await workflow_state.set_state(
+        body.telefono,
+        "esperando_foto",
+        data={"token": body.token},
+        ttl=settings.TENS_TOKEN_TTL_SECONDS,
+    )
+    await WhatsAppService.send_message(
+        body.telefono,
+        f"📸 Solicitud de foto pendiente.\nSesión: {body.token}\n"
+        "Responde a este chat con la foto del paciente."
+    )
     return {"status": "ok"}

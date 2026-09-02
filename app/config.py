@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     FM_RECADOS_CREATE_LAYOUT: str = Field(default="T_T500_Recados", description="Layout para crear recados en FileMaker")
     FM_PACIENTES_LAYOUT: str = Field(default="ListadoPacientes_dapi", description="Layout de pacientes en FileMaker")
     FM_DIAS_BLOQUEADOS_LAYOUT: str = Field(default="ListadoDiasBloqueadosDoctores_dapi", description="Layout de dias bloqueados en FileMaker")
+    FM_TOKENS_FOTO_LAYOUT: str = Field(default="TokensFoto_dapi", description="Layout del bridge de tokens de foto (rol tens) en FileMaker")
+    FM_FOTOS_SET_LAYOUT: str = Field(default="SetFotosPaciente_dapi", description="Layout para crear el registro 'set' de fotos (padre) en FileMaker")
+    FM_FOTOS_LAYOUT: str = Field(default="FotosPaciente_dapi", description="Layout para crear el registro de foto individual (hijo, con el contenedor Foto) en FileMaker")
 
     # --- WhatsApp ---
     WSP_TOKEN: str = Field(description="Token de WhatsApp Business API")
@@ -31,6 +34,14 @@ class Settings(BaseSettings):
     WSP_VERIFY_TOKEN: str = Field(description="Token de verificacion de webhook")
     WSP_APP_SECRET: str = Field(description="App Secret para firma HMAC-SHA256")
     META_API_VERSION: str = Field(default="v25.0", description="Version de la API de Meta Graph")
+
+    # --- Endpoints internos (FileMaker -> servidor) ---
+    INTERNAL_API_KEY: str = Field(description="Secreto compartido para autenticar endpoints internos (ej. disparo de solicitud de foto desde FileMaker)")
+    TENS_TOKEN_TTL_SECONDS: int = Field(default=600, description="TTL en segundos del estado de espera de foto del rol tens (debe calzar con la expiracion del token en FileMaker)")
+    TENS_FOTO_ROLES_PERMITIDOS: str = Field(
+        default="tens,gerencia",
+        description="Roles autorizados a recibir y completar una solicitud de foto via el flujo tens (separados por coma)",
+    )
 
     # --- Redis ---
     REDIS_URL: str = Field(default="redis://localhost:6379/0", description="URL de conexion a Redis")
@@ -92,6 +103,11 @@ class Settings(BaseSettings):
     def llm_has_legacy_fallback(self, role: str) -> bool:
         """Verifica si un rol tiene fallback a legacy habilitado."""
         roles = {r.strip().lower() for r in self.LLM_LEGACY_FALLBACK_ROLES.split(",") if r.strip()}
+        return role.lower().strip() in roles
+
+    def tens_foto_rol_permitido(self, role: str) -> bool:
+        """Verifica si un rol puede recibir/completar una solicitud de foto (rol tens)."""
+        roles = {r.strip().lower() for r in self.TENS_FOTO_ROLES_PERMITIDOS.split(",") if r.strip()}
         return role.lower().strip() in roles
 
     def llm_is_in_maintenance(self, role: str, phone: str) -> bool:

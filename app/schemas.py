@@ -32,6 +32,12 @@ class DocumentoWsp(BaseModel):
     filename: Optional[str] = None
     caption: Optional[str] = None
 
+class ImagenWsp(BaseModel):
+    id: str
+    mime_type: Optional[str] = None
+    sha256: Optional[str] = None
+    caption: Optional[str] = None
+
 class Message(BaseModel):
     sender_phone: Optional[str] = Field(default=None, alias="from")
     from_user_id: Optional[str] = None
@@ -41,6 +47,7 @@ class Message(BaseModel):
     interactive: Optional[Interactive] = None
     button: Optional[Button] = None
     document: Optional[DocumentoWsp] = None
+    image: Optional[ImagenWsp] = None
     type: str
 
     model_config = {"populate_by_name": True}
@@ -61,3 +68,9 @@ class Entry(BaseModel):
 class WSPPayload(BaseModel):
     object: str
     entry: List[Entry]
+
+class SolicitudFotoRequest(BaseModel):
+    """Body del endpoint interno que FileMaker llama para disparar la solicitud de foto al TENS.
+    Nunca debe incluir datos identificables del paciente (nombre/RUT)."""
+    token: str
+    telefono: str

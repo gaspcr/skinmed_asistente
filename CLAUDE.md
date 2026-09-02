@@ -36,6 +36,7 @@ No test suite or linter is configured.
 - `WSP_PHONE_ID` — WhatsApp phone number ID
 - `WSP_VERIFY_TOKEN` — Webhook verification token
 - `WSP_APP_SECRET` — WhatsApp App Secret for HMAC-SHA256 webhook signature verification
+- `INTERNAL_API_KEY` — Shared secret for internal endpoints called by trusted systems (e.g. FileMaker triggering the `tens` photo-request flow), checked against the `X-Internal-Token` header
 
 **Optional** (with defaults):
 - `REDIS_URL` — Redis connection URL (default: `redis://localhost:6379/0`)
@@ -44,6 +45,11 @@ No test suite or linter is configured.
 - `FM_DB` — FileMaker database name (default: `Agenda%20v20b`)
 - `FM_AGENDA_LAYOUT` — FileMaker agenda layout (default: `ListadoDeHoras_dapi`)
 - `FM_AUTH_LAYOUT` — FileMaker auth layout (default: `AuthUsuarios_dapi`)
+- `FM_TOKENS_FOTO_LAYOUT` — FileMaker layout for the `tens` photo-upload bridge table (UUID token → patient ID) (default: `TokensFoto_dapi`)
+- `FM_FOTOS_SET_LAYOUT` — FileMaker layout for creating the parent "set" record (`SetFotosPaciente`: session metadata — date, responsible staff) (default: `SetFotosPaciente_dapi`)
+- `FM_FOTOS_LAYOUT` — FileMaker layout for creating the child photo record and uploading into its `Foto` container field (`FotosPaciente`, linked to the set via `SetFotosPaciente_fk`) (default: `FotosPaciente_dapi`)
+- `TENS_TOKEN_TTL_SECONDS` — TTL in seconds for the `tens` pending-photo workflow state; should match the token expiration configured in FileMaker (default: `600`)
+- `TENS_FOTO_ROLES_PERMITIDOS` — Roles allowed to receive and complete a pending photo-upload request, CSV (default: `tens,gerencia`)
 - `META_API_VERSION` — Meta Graph API version (default: `v24.0`)
 - `ENVIRONMENT` — Execution environment: `development`, `staging`, `production` (default: `production`)
 - `RATE_LIMIT_MAX` — Max messages per rate limit window (default: `30`)
@@ -123,6 +129,7 @@ All workflow classes extend `WorkflowHandler` (abstract base in `app/workflows/b
 - `medico` — Fully implemented (LLM + legacy fallback)
 - `gerencia` — Fully implemented (legacy only, LLM planned)
 - `medico_gerencia` — Hybrid: inherits from `gerencia` with access to doctor mode
+- `tens` — Legacy only. Uploads patient photos to FileMaker via a one-time UUID token: FileMaker triggers `POST /internal/tens/solicitud-foto` (shared-secret auth) which messages a phone with the token, and the photo reply is resolved back to the real patient record entirely inside FileMaker — no patient-identifying data ever travels over WhatsApp. The photo-upload logic (`app.workflows.tens.procesar_foto_tens`) is also wired into `gerencia`/`medico_gerencia`'s `handle_image`, so any role listed in `TENS_FOTO_ROLES_PERMITIDOS` can complete a pending photo request, not just phones registered with `ROL = "tens"`
 
 **To add a new role:**
 1. Create workflow class in `app/workflows/`

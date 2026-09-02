@@ -407,6 +407,12 @@ class ManagerWorkflow(WorkflowHandler):
             f"Ejemplo: *2026-05-20 20:00*"
         )
 
+    async def handle_image(self, user, phone: str, image):
+        """Reutiliza el flujo de subida de foto del rol tens (piloto: permite
+        que gerencia tambien complete una solicitud de foto pendiente)."""
+        from app.workflows.tens import procesar_foto_tens
+        await procesar_foto_tens(user, phone, image)
+
     async def _handle_price_schedule_time(self, user, phone: str, message_text: str):
         """Usa mini-LLM para extraer la fecha/hora en lenguaje natural y pide confirmación."""
         from app.services import llm_service
