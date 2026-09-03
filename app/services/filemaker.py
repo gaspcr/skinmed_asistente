@@ -134,6 +134,34 @@ class FileMakerService:
         return resp
 
     @classmethod
+    async def _fm_update_record(
+        cls, layout: str, record_id: str, field_data: dict, intentar_reauth: bool = True
+    ) -> httpx.Response:
+        """
+        Actualiza campos de un registro existente en FileMaker (PATCH).
+        Si recibe HTTP 401, refresca el token y reintenta una vez.
+        """
+        settings = get_settings()
+        client = http_svc.get_client()
+        token = await cls.get_token()
+        url = f"https://{settings.FM_HOST}/fmi/data/v1/databases/{settings.FM_DB}/layouts/{layout}/records/{record_id}"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        payload = {"fieldData": field_data}
+
+        async with _fm_circuit_breaker:
+            resp = await client.patch(url, json=payload, headers=headers)
+
+        if resp.status_code == 401 and intentar_reauth:
+            logger.info("Token FM expirado, refrescando...")
+            await cls.get_token(force_refresh=True)
+            return await cls._fm_update_record(layout, record_id, field_data, intentar_reauth=False)
+
+        return resp
+
+    @classmethod
     async def _fm_get_record(cls, layout: str, record_id: str, intentar_reauth: bool = True) -> httpx.Response:
         """
         Obtiene un registro por su recordId (util para leer campos auto-enter,
@@ -590,12 +618,17 @@ class FileMakerService:
         paciente_id: str,
         responsable: str,
         nombre_set: str = "Foto WhatsApp (TENS)",
-    ) -> str:
+    ) -> dict:
         """
-        Crea el registro 'set' (padre, SetFotosPaciente) para el paciente y
-        retorna su PK (SetFotosPacientes_pk, serial auto-enter que no viene
-        en la respuesta de creacion) para enlazar fotos hijas via
-        agregar_foto_a_set.
+        Crea el registro 'set' (padre, SetFotosPaciente) para el paciente.
+
+        Returns:
+            {"set_pk": ..., "record_id": ...}
+            - "set_pk" es SetFotosPacientes_pk (serial auto-enter que no viene
+              en la respuesta de creacion) y sirve para enlazar fotos hijas
+              via agregar_foto_a_set.
+            - "record_id" es el recordId de la Data API, necesario para
+              actualizar el set despues (ver actualizar_responsable_set).
 
         paciente_id debe ser el ID legacy numerico (Pacientes::ID), no el
         UUID (_PK_ID Paciente): el portal de fotos existente en la ficha
@@ -627,7 +660,10 @@ class FileMakerService:
                 raise ServicioNoDisponibleError(
                     "FileMaker", f"crear_set_fotos (leer set): HTTP {resp_get.status_code}"
                 )
-            return resp_get.json()['response']['data'][0]['fieldData']['SetFotosPacientes_pk']
+            return {
+                "set_pk": resp_get.json()['response']['data'][0]['fieldData']['SetFotosPacientes_pk'],
+                "record_id": set_record_id,
+            }
 
         try:
             return await con_reintentos(
@@ -644,6 +680,46 @@ class FileMakerService:
             raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
         except Exception as e:
             logger.error("Error inesperado al crear set de fotos: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
+    async def actualizar_responsable_set(set_record_id: str, responsable: str) -> bool:
+        """
+        Escribe el responsable definitivo del set de fotos (las iniciales que
+        el TENS/enfermera envia al cerrar la sesion, ej. "AnSa"), reemplazando
+        el nombre del usuario del telefono con que se creo el set.
+
+        set_record_id es el recordId de la Data API que devuelve crear_set_fotos.
+        """
+        settings = get_settings()
+
+        async def _actualizar():
+            resp = await FileMakerService._fm_update_record(
+                settings.FM_FOTOS_SET_LAYOUT,
+                set_record_id,
+                {"Responsable de toma de fotos": responsable},
+            )
+            if resp.status_code == 200:
+                return True
+            raise ServicioNoDisponibleError(
+                "FileMaker", f"actualizar_responsable_set: HTTP {resp.status_code}"
+            )
+
+        try:
+            return await con_reintentos(
+                _actualizar,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker actualizar_responsable_set",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al actualizar responsable del set: %s", e)
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
 
     @staticmethod

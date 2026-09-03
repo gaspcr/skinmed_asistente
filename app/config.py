@@ -38,8 +38,12 @@ class Settings(BaseSettings):
     # --- Endpoints internos (FileMaker -> servidor) ---
     INTERNAL_API_KEY: str = Field(description="Secreto compartido para autenticar endpoints internos (ej. disparo de solicitud de foto desde FileMaker)")
     TENS_TOKEN_TTL_SECONDS: int = Field(default=600, description="TTL en segundos del estado de espera de foto del rol tens (debe calzar con la expiracion del token en FileMaker)")
+    TENS_SESION_TTL_SECONDS: int = Field(
+        default=1800,
+        description="TTL en segundos de la sesion de fotos ya iniciada (se renueva con cada foto); al vencer, la sesion se cierra sola",
+    )
     TENS_FOTO_ROLES_PERMITIDOS: str = Field(
-        default="tens,gerencia",
+        default="tens,enfermeria,gerencia",
         description="Roles autorizados a recibir y completar una solicitud de foto via el flujo tens (separados por coma)",
     )
 

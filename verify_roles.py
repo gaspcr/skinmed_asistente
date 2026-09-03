@@ -31,7 +31,7 @@ def test_role_registry():
     print(f"Total: {len(registered_roles)} roles")
     print()
     
-    expected_roles = ['medico', 'gerencia', 'medico_gerencia', 'tens']
+    expected_roles = ['medico', 'gerencia', 'medico_gerencia', 'tens', 'enfermeria']
     missing_roles = [r for r in expected_roles if r not in registered_roles]
     
     if missing_roles:
