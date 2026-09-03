@@ -586,27 +586,22 @@ class FileMakerService:
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
 
     @staticmethod
-    async def subir_foto_paciente(
+    async def crear_set_fotos(
         paciente_id: str,
-        contenido: bytes,
-        filename: str,
-        content_type: str,
         responsable: str,
-    ) -> bool:
+        nombre_set: str = "Foto WhatsApp (TENS)",
+    ) -> str:
         """
-        Crea el registro 'set' (padre, SetFotosPaciente) para el paciente,
-        crea el registro de foto individual (hijo, FotosPaciente) enlazado
-        al set, y sube el binario al campo contenedor 'Foto' de ese hijo.
+        Crea el registro 'set' (padre, SetFotosPaciente) para el paciente y
+        retorna su PK (SetFotosPacientes_pk, serial auto-enter que no viene
+        en la respuesta de creacion) para enlazar fotos hijas via
+        agregar_foto_a_set.
 
         paciente_id debe ser el ID legacy numerico (Pacientes::ID), no el
         UUID (_PK_ID Paciente): el portal de fotos existente en la ficha
         filtra SetFotosPaciente via Pacientes::ID = SetFotosPaciente::Paciente_fk,
         asi que escribir el UUID ahi deja la foto invisible en la ficha
         aunque el registro se cree correctamente.
-
-        Nota: FotosPaciente::Paciente_fk es un campo Lookup derivado de la
-        relacion con SetFotosPaciente, por lo que no se escribe directamente
-        aqui - se completa solo al enlazar via SetFotosPaciente_fk.
         """
         settings = get_settings()
         tz = pytz.timezone("America/Santiago")
@@ -616,53 +611,30 @@ class FileMakerService:
             "Paciente_fk": paciente_id,
             "Fecha Toma": hoy_str,
             "Responsable de toma de fotos": responsable,
-            "Nombre Set": "Foto WhatsApp (TENS)",
+            "Nombre Set": nombre_set,
         }
 
-        async def _subir():
-            # 1. Crear el registro "set" (padre)
+        async def _crear():
             resp_set = await FileMakerService._fm_create_record(settings.FM_FOTOS_SET_LAYOUT, set_field_data)
             if resp_set.status_code not in (200, 201):
                 raise ServicioNoDisponibleError(
-                    "FileMaker", f"subir_foto_paciente (crear set): HTTP {resp_set.status_code}"
+                    "FileMaker", f"crear_set_fotos (crear set): HTTP {resp_set.status_code}"
                 )
             set_record_id = resp_set.json()['response']['recordId']
 
-            # 2. Leer el registro recien creado para obtener su PK (serial
-            #    auto-enter, no viene en la respuesta de creacion) y poder
-            #    enlazar el hijo via SetFotosPaciente_fk
             resp_get = await FileMakerService._fm_get_record(settings.FM_FOTOS_SET_LAYOUT, set_record_id)
             if resp_get.status_code != 200:
                 raise ServicioNoDisponibleError(
-                    "FileMaker", f"subir_foto_paciente (leer set): HTTP {resp_get.status_code}"
+                    "FileMaker", f"crear_set_fotos (leer set): HTTP {resp_get.status_code}"
                 )
-            set_pk = resp_get.json()['response']['data'][0]['fieldData']['SetFotosPacientes_pk']
-
-            # 3. Crear el registro de foto individual (hijo), enlazado al set
-            foto_field_data = {"SetFotosPaciente_fk": set_pk}
-            resp_foto = await FileMakerService._fm_create_record(settings.FM_FOTOS_LAYOUT, foto_field_data)
-            if resp_foto.status_code not in (200, 201):
-                raise ServicioNoDisponibleError(
-                    "FileMaker", f"subir_foto_paciente (crear foto): HTTP {resp_foto.status_code}"
-                )
-            foto_record_id = resp_foto.json()['response']['recordId']
-
-            # 4. Subir el binario al contenedor 'Foto' del hijo
-            resp_container = await FileMakerService._fm_upload_container(
-                settings.FM_FOTOS_LAYOUT, foto_record_id, "Foto", contenido, filename, content_type
-            )
-            if resp_container.status_code not in (200, 201):
-                raise ServicioNoDisponibleError(
-                    "FileMaker", f"subir_foto_paciente (subir contenedor): HTTP {resp_container.status_code}"
-                )
-            return True
+            return resp_get.json()['response']['data'][0]['fieldData']['SetFotosPacientes_pk']
 
         try:
             return await con_reintentos(
-                _subir,
+                _crear,
                 max_intentos=2,
                 backoff_base=1.0,
-                nombre_operacion="FileMaker subir_foto_paciente",
+                nombre_operacion="FileMaker crear_set_fotos",
             )
         except ServicioNoDisponibleError:
             raise
@@ -671,5 +643,58 @@ class FileMakerService:
         except httpx.RequestError as e:
             raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
         except Exception as e:
-            logger.error("Error inesperado al subir foto de paciente: %s", e)
+            logger.error("Error inesperado al crear set de fotos: %s", e)
+            raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
+
+    @staticmethod
+    async def agregar_foto_a_set(
+        set_pk: str,
+        contenido: bytes,
+        filename: str,
+        content_type: str,
+    ) -> bool:
+        """
+        Crea el registro de foto individual (hijo, FotosPaciente) enlazado
+        a un set ya existente, y sube el binario al campo contenedor 'Foto'.
+        Permite subir varias fotos a un mismo set (una por llamada).
+
+        Nota: FotosPaciente::Paciente_fk es un campo Lookup derivado de la
+        relacion con SetFotosPaciente, por lo que no se escribe directamente
+        aqui - se completa solo al enlazar via SetFotosPaciente_fk.
+        """
+        settings = get_settings()
+        foto_field_data = {"SetFotosPaciente_fk": set_pk}
+
+        async def _subir():
+            resp_foto = await FileMakerService._fm_create_record(settings.FM_FOTOS_LAYOUT, foto_field_data)
+            if resp_foto.status_code not in (200, 201):
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"agregar_foto_a_set (crear foto): HTTP {resp_foto.status_code}"
+                )
+            foto_record_id = resp_foto.json()['response']['recordId']
+
+            resp_container = await FileMakerService._fm_upload_container(
+                settings.FM_FOTOS_LAYOUT, foto_record_id, "Foto", contenido, filename, content_type
+            )
+            if resp_container.status_code not in (200, 201):
+                raise ServicioNoDisponibleError(
+                    "FileMaker", f"agregar_foto_a_set (subir contenedor): HTTP {resp_container.status_code}"
+                )
+            return True
+
+        try:
+            return await con_reintentos(
+                _subir,
+                max_intentos=2,
+                backoff_base=1.0,
+                nombre_operacion="FileMaker agregar_foto_a_set",
+            )
+        except ServicioNoDisponibleError:
+            raise
+        except CircuitBreakerAbierto as e:
+            raise ServicioNoDisponibleError("FileMaker", str(e))
+        except httpx.RequestError as e:
+            raise ServicioNoDisponibleError("FileMaker", f"Error de conexion: {e}")
+        except Exception as e:
+            logger.error("Error inesperado al agregar foto a set: %s", e)
             raise ServicioNoDisponibleError("FileMaker", f"Error inesperado: {e}")
