@@ -94,6 +94,13 @@ class ManagerWorkflow(WorkflowHandler):
             )
             return
 
+        # Sesion de fotos TENS en curso (rol autorizado via
+        # TENS_FOTO_ROLES_PERMITIDOS): "listo" la cierra, cualquier otro
+        # texto recuerda que se espera otra foto o el cierre.
+        from app.workflows.tens import manejar_texto_sesion_fotos_tens
+        if await manejar_texto_sesion_fotos_tens(phone, message_text):
+            return
+
         # ── Pasos de actualización de precios: siempre ANTES del LLM ──
         step = await workflow_state.get_step(phone)
         if step == "waiting_for_csv":
