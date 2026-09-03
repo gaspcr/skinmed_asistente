@@ -100,6 +100,30 @@ async def procesar_foto_tens(user, phone: str, image):
         await redis_svc.release_lock(lock_key)
 
 
+async def procesar_documento_como_foto_tens(user, phone: str, document) -> bool:
+    """
+    WhatsApp entrega como "documento" las imagenes que se envian como
+    archivo (p. ej. arrastrandolas desde el escritorio o con la opcion
+    "enviar como archivo"). Durante una sesion de fotos eso es una foto
+    mas, no un archivo adjunto.
+
+    Returns:
+        True si el documento se proceso como foto (el llamador no debe
+        seguir tratandolo como documento); False en caso contrario.
+    """
+    step = await workflow_state.get_step(phone)
+    if step not in PASOS_SESION_FOTOS:
+        return False
+
+    mime = getattr(document, "mime_type", "") or ""
+    if not mime.startswith("image/"):
+        return False
+
+    logger.info("[TENS] Documento con mime %s tratado como foto para %s", mime, phone)
+    await procesar_foto_tens(user, phone, document)
+    return True
+
+
 async def _procesar_foto_tens_interno(user, phone: str, image):
     """
     Logica compartida de subida de foto via token de un solo uso.
@@ -354,6 +378,16 @@ class TensWorkflow(WorkflowHandler):
 
     async def handle_image(self, user, phone: str, image):
         await procesar_foto_tens(user, phone, image)
+
+    async def handle_document(self, user, phone: str, document):
+        if await procesar_documento_como_foto_tens(user, phone, document):
+            return
+
+        await WhatsAppService.send_message(
+            phone,
+            "Este chat solo recibe fotos de pacientes. Responde con la foto "
+            "cuando llegue una solicitud desde la ficha en FileMaker."
+        )
 
 
 @register_workflow("enfermeria")

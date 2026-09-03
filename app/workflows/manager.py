@@ -324,6 +324,12 @@ class ManagerWorkflow(WorkflowHandler):
 
     async def handle_document(self, user, phone: str, document):
         """Recibe un CSV de Shopify para programar actualización masiva de precios."""
+        # Sesion de fotos en curso: una imagen enviada como archivo es una
+        # foto del paciente, no un CSV de precios.
+        from app.workflows.tens import procesar_documento_como_foto_tens
+        if await procesar_documento_como_foto_tens(user, phone, document):
+            return
+
         mime = getattr(document, "mime_type", "") or ""
         filename = getattr(document, "filename", "") or ""
 
