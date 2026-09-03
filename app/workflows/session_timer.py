@@ -84,6 +84,15 @@ async def _timeout_check(phone: str):
         # Hubo actividad nueva, otro timer se encargará
         return
 
+    # Las sesiones de fotos (rol tens/enfermeria) tienen su propio ciclo de
+    # vida: duran TENS_SESION_TTL_SECONDS (30 min, renovado con cada foto) y
+    # se cierran escribiendo las iniciales. El timeout generico de
+    # inactividad no debe cortarlas mientras la enfermera saca las fotos.
+    from app.workflows.tens import PASOS_SESION_FOTOS
+    if await workflow_state.get_step(phone) in PASOS_SESION_FOTOS:
+        logger.debug("Sesión de fotos activa para %s; no se aplica timeout de inactividad", phone)
+        return
+
     # No hubo actividad → timeout
     logger.info("Timeout de inactividad para %s (%ds)", phone, timeout)
 

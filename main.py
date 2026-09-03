@@ -313,26 +313,36 @@ async def solicitar_foto_tens(
 ):
     """
     Endpoint interno llamado por el script de FileMaker para disparar la
-    solicitud de foto al TENS. Recibe solo el token (UUID) y el telefono;
-    nunca datos identificables del paciente.
+    solicitud de foto al telefono elegido en la ficha del paciente. Recibe
+    solo el token (UUID) y el telefono; nunca datos identificables del
+    paciente.
     """
     settings = get_settings()
 
+    # El telefono viene de un campo de FileMaker (elegido de la lista de
+    # usuarios), asi que puede llegar como "+56912345678" o con espacios.
+    # WhatsApp identifica al remitente solo con digitos, y esa forma es la
+    # que usa la clave de estado del workflow: normalizar para que calcen.
+    telefono = "".join(c for c in body.telefono if c.isdigit()).lstrip("0")
+    if not telefono:
+        raise HTTPException(status_code=422, detail="Telefono invalido")
+
     # Defensa en profundidad: confirmar que el telefono corresponde a un rol
     # autorizado a recibir/completar solicitudes de foto (ver TENS_FOTO_ROLES_PERMITIDOS)
-    tens_user = await AuthService.get_user_by_phone(body.telefono)
+    tens_user = await AuthService.get_user_by_phone(telefono)
     if not tens_user or not settings.tens_foto_rol_permitido(tens_user.role):
         raise HTTPException(status_code=404, detail="Telefono no corresponde a un usuario autorizado para recibir solicitudes de foto")
 
     await workflow_state.set_state(
-        body.telefono,
+        telefono,
         "esperando_foto",
         data={"token": body.token},
         ttl=settings.TENS_TOKEN_TTL_SECONDS,
     )
     await WhatsAppService.send_message(
-        body.telefono,
+        telefono,
         f"📸 Solicitud de foto pendiente.\nSesión: {body.token}\n"
-        "Responde a este chat con la foto del paciente."
+        "Responde a este chat con las fotos del paciente. "
+        "Cuando termines escribe *listo*."
     )
     return {"status": "ok"}
