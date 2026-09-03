@@ -69,6 +69,18 @@ async def procesar_foto_tens(user, phone: str, image):
         await workflow_state.clear_state(phone)
         return
 
+    if not info.get("paciente_numero_id"):
+        logger.error(
+            "[TENS] Token %s resuelto sin paciente_numero_id (registro TokensFoto incompleto)",
+            token,
+        )
+        await WhatsAppService.send_message(
+            phone,
+            "No se pudo verificar la solicitud (datos incompletos). Contacta a soporte."
+        )
+        await workflow_state.clear_state(phone)
+        return
+
     try:
         contenido = await WhatsAppService.download_media(image.id)
     except Exception as e:
@@ -84,7 +96,7 @@ async def procesar_foto_tens(user, phone: str, image):
 
     try:
         await FileMakerService.subir_foto_paciente(
-            info["paciente_fk"], contenido, filename, mime, responsable
+            info["paciente_numero_id"], contenido, filename, mime, responsable
         )
         await FileMakerService.invalidar_token_foto(info["record_id"])
     except ServicioNoDisponibleError as e:

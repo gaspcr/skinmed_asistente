@@ -500,7 +500,11 @@ class FileMakerService:
         (Expiracion > ahora), asi que un token vencido simplemente no matchea.
 
         Returns:
-            {"paciente_fk": ..., "record_id": ...} o None si no hay match.
+            {"paciente_fk": ..., "paciente_numero_id": ..., "record_id": ...}
+            o None si no hay match. "paciente_numero_id" es el ID legacy
+            (numerico, Pacientes::ID) que usa el portal de fotos existente
+            en la ficha - es el valor que hay que escribir en
+            SetFotosPaciente::Paciente_fk para que la foto aparezca ahi.
         """
         settings = get_settings()
         tz = pytz.timezone("America/Santiago")
@@ -524,6 +528,7 @@ class FileMakerService:
                     record = data[0]
                     return {
                         "paciente_fk": record['fieldData'].get('Paciente_fk'),
+                        "paciente_numero_id": record['fieldData'].get('PacienteNumeroId'),
                         "record_id": record.get('recordId'),
                     }
                 return None
@@ -582,7 +587,7 @@ class FileMakerService:
 
     @staticmethod
     async def subir_foto_paciente(
-        paciente_fk: str,
+        paciente_id: str,
         contenido: bytes,
         filename: str,
         content_type: str,
@@ -593,6 +598,12 @@ class FileMakerService:
         crea el registro de foto individual (hijo, FotosPaciente) enlazado
         al set, y sube el binario al campo contenedor 'Foto' de ese hijo.
 
+        paciente_id debe ser el ID legacy numerico (Pacientes::ID), no el
+        UUID (_PK_ID Paciente): el portal de fotos existente en la ficha
+        filtra SetFotosPaciente via Pacientes::ID = SetFotosPaciente::Paciente_fk,
+        asi que escribir el UUID ahi deja la foto invisible en la ficha
+        aunque el registro se cree correctamente.
+
         Nota: FotosPaciente::Paciente_fk es un campo Lookup derivado de la
         relacion con SetFotosPaciente, por lo que no se escribe directamente
         aqui - se completa solo al enlazar via SetFotosPaciente_fk.
@@ -602,7 +613,7 @@ class FileMakerService:
         hoy_str = datetime.now(tz).strftime("%m-%d-%Y")
 
         set_field_data = {
-            "Paciente_fk": paciente_fk,
+            "Paciente_fk": paciente_id,
             "Fecha Toma": hoy_str,
             "Responsable de toma de fotos": responsable,
             "Nombre Set": "Foto WhatsApp (TENS)",
