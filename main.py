@@ -157,6 +157,24 @@ async def verify(request: Request):
     raise HTTPException(status_code=403, detail="Token de verificación inválido")
 
 
+async def _avisar_tipo_no_soportado(phone: str, role: str) -> bool:
+    """
+    Decide si vale la pena responder "tipo de mensaje no soportado".
+
+    Al enviar varias fotos juntas, WhatsApp a veces entrega alguna con un
+    tipo que no procesamos, y el aviso solo ensucia el chat de quien esta
+    subiendo fotos (las demas si se suben). En una sesion de fotos activa,
+    y en los chats de tens/enfermeria - que existen solo para eso -, se
+    registra en el log y se deja pasar en silencio.
+    """
+    from app.workflows.tens import PASOS_SESION_FOTOS
+
+    if role.lower().strip() in ("tens", "enfermeria"):
+        return False
+
+    return await workflow_state.get_step(phone) not in PASOS_SESION_FOTOS
+
+
 async def _process_message(msg, background_tasks: BackgroundTasks):
     """
     Procesa un mensaje individual de WhatsApp.
@@ -207,11 +225,12 @@ async def _process_message(msg, background_tasks: BackgroundTasks):
         # Manejo de tipos de mensaje no soportados
         if msg.type not in TIPOS_MENSAJE_SOPORTADOS:
             logger.info("[MAIN] Tipo de mensaje no soportado: '%s' de phone=%s", msg.type, sender_phone)
-            await WhatsAppService.send_message(
-                sender_phone,
-                "Lo siento, este tipo de mensaje no es soportado. "
-                "Por favor envía un mensaje de texto."
-            )
+            if await _avisar_tipo_no_soportado(sender_phone, user.role):
+                await WhatsAppService.send_message(
+                    sender_phone,
+                    "Lo siento, este tipo de mensaje no es soportado. "
+                    "Por favor envía un mensaje de texto."
+                )
             return
 
         # Registrar actividad y programar timeout de inactividad
