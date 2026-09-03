@@ -10,7 +10,16 @@ Una solicitud puede incluir varias fotos (un "set"): la primera foto
 resuelve el token, crea el set en FileMaker e invalida el token; las
 fotos siguientes se agregan al mismo set sin volver a tocar el token.
 El TENS cierra la sesion escribiendo "listo".
+
+Cuando WhatsApp entrega varias fotos de un mismo envio (album), cada una
+llega como un webhook independiente casi al mismo tiempo. Sin un lock,
+todas leerian el mismo estado "esperando primera foto" antes de que
+cualquiera alcance a actualizarlo, y competirian por el mismo token
+(la primera lo consume, el resto lo encuentra ya invalidado). El lock
+por telefono serializa el procesamiento para que cada foto vea el
+estado que dejo la anterior.
 """
+import asyncio
 import logging
 
 from fastapi import BackgroundTasks
@@ -19,6 +28,7 @@ from app.config import get_settings
 from app.workflows.base import WorkflowHandler
 from app.workflows.role_registry import register_workflow
 from app.workflows import state as workflow_state
+from app.services import redis as redis_svc
 from app.services.filemaker import FileMakerService
 from app.services.whatsapp import WhatsAppService
 from app.exceptions import ServicioNoDisponibleError
@@ -32,8 +42,43 @@ PALABRAS_CIERRE_SESION = {
     "listo", "fin", "listo.", "fin.", "terminado", "terminado.", "salir", "salir.",
 }
 
+LOCK_TTL_SEGUNDOS = 30
+LOCK_ESPERA_MAX_SEGUNDOS = 20
+LOCK_INTERVALO_REINTENTO = 0.3
+
 
 async def procesar_foto_tens(user, phone: str, image):
+    """
+    Punto de entrada publico: serializa el procesamiento de fotos por
+    telefono (ver nota de modulo sobre el lock) y delega en
+    _procesar_foto_tens_interno.
+    """
+    lock_key = f"tens:foto:lock:{phone}"
+    esperado = 0.0
+    adquirido = False
+    while esperado < LOCK_ESPERA_MAX_SEGUNDOS:
+        adquirido = await redis_svc.acquire_lock(lock_key, ttl=LOCK_TTL_SEGUNDOS)
+        if adquirido:
+            break
+        await asyncio.sleep(LOCK_INTERVALO_REINTENTO)
+        esperado += LOCK_INTERVALO_REINTENTO
+
+    if not adquirido:
+        logger.warning("[TENS] No se pudo adquirir lock de foto para %s (timeout)", phone)
+        await WhatsAppService.send_message(
+            phone,
+            "Estamos procesando otra foto tuya en este momento. Intenta enviar "
+            "esta de nuevo en unos segundos."
+        )
+        return
+
+    try:
+        await _procesar_foto_tens_interno(user, phone, image)
+    finally:
+        await redis_svc.release_lock(lock_key)
+
+
+async def _procesar_foto_tens_interno(user, phone: str, image):
     """
     Logica compartida de subida de foto via token de un solo uso.
     Se usa desde TensWorkflow y desde cualquier otro rol autorizado
