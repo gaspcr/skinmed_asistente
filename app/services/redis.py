@@ -68,6 +68,22 @@ async def set_json(key: str, value: Any, ttl: Optional[int] = None):
     await set(key, json.dumps(value), ttl=ttl)
 
 
+async def acquire_lock(key: str, ttl: int) -> bool:
+    """
+    Intenta adquirir un lock atomico (SET NX). No bloquea ni reintenta -
+    retorna de inmediato True si lo obtuvo, False si ya estaba tomado.
+    El ttl es una valvula de seguridad por si el proceso que lo tomo
+    muere sin liberarlo.
+    """
+    resultado = await _get_client().set(key, "1", nx=True, ex=ttl)
+    return bool(resultado)
+
+
+async def release_lock(key: str):
+    """Libera un lock adquirido con acquire_lock."""
+    await _get_client().delete(key)
+
+
 async def verificar_rate_limit(key: str, limite: int, ventana_ttl: int) -> bool:
     """
     Verifica rate limit usando contador simple en Redis.
